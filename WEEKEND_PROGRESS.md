@@ -87,3 +87,7 @@
 - Sonnet fixer (~224k tokens) fixed all 7 + security hardening: key_id↔agent_id binding (`--agent-keys agent_id=key_id=path`), unverified rejections bucketed as "unverified" not the claimed id, `last_error`/rejection reasons redacted before storage, per-agent seq watermarks persisted in the snapshot, `last_heard_at` from `sent_at`. One existing test was corrected because it asserted the vulnerable behavior.
 - Judgment call recorded: the `last_seq()` off-by-one Opus flagged was NOT changed — fixer traced main.rs and found snapshot-save always follows log-append, and the persistence test locks the exclusive bound intentionally. Revisit if the poll loop ever changes.
 - Tests 88 → **100**; clippy/fmt clean; both binaries build.
+
+## 2026-09-05T00:55Z — CI red streak (runs #7–#9) root-caused
+
+- Three consecutive failed runs after M-01: the Rust smoke step ran `cargo run` which refuses to pick between the two binaries once `foundry-agent` existed, so the output was empty and the "honest no-remote banner" assertion failed. Local tests had passed because they never invoked `cargo run`. Fix: `default-run = "foundry"` (0894be3). Lesson recorded: the smoke step is doing its job — it fails closed when the dashboard produces nothing.
