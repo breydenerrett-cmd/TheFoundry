@@ -2,6 +2,7 @@
 name = "foundry_core"
 version = "0.1.0"
 edition = "2021"
+default-run = "foundry"
 description = "THE FOUNDRY watcher/state core: normalized events, observers, redactor, reducer, text renderer. Phase 2/3 scope only — no UI, no Pixi."
 
 [[bin]]
