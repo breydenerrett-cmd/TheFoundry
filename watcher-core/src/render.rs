@@ -112,6 +112,15 @@ pub fn render_floor(
         out.push_str(&format!(
             "{BOLD} THE FOUNDRY — LIVE (pipeline verified){RESET}\n"
         ));
+    } else if let Some(restored_at) = store.pipeline.restored_at {
+        // S-01: a snapshot was loaded this process and no fresh (non-canary)
+        // observer event has landed yet — the floor must not read as LIVE
+        // just because the canary happens to be ticking.
+        let age = (now - restored_at).num_seconds().max(0);
+        out.push_str(&format!(
+            "\x1b[1;31m THE FOUNDRY — UNVERIFIED (restored snapshot, age {} — awaiting fresh observations){RESET}\n",
+            fmt_age(age)
+        ));
     } else if store.any_real_observer_down() {
         let down_names: Vec<&str> = store
             .observer_health
@@ -250,6 +259,12 @@ pub fn render_floor(
             } else {
                 ""
             };
+            // S-01: a record carried over from a loaded snapshot, not a live
+            // observation in this process — its displayed_state is already
+            // forced to StaleUnknown by `persist::mark_restored`, but this
+            // tag is what tells a human WHY a session that used to be
+            // WORKING now reads STALE/UNKNOWN.
+            let restored_tag = if rec.restored { " (restored)" } else { "" };
             let elapsed = (now - rec.last_activity_at).num_seconds().max(0);
             let env = rec
                 .session_kind
@@ -277,7 +292,7 @@ pub fn render_floor(
                 .unwrap_or("(no task summary)");
 
             out.push_str(&format!(
-            "  {color}[{label:>16}]{RESET}{warn} {DIM}({fidelity}){RESET} {} [{env}] model={model_str} elapsed={} task=\"{task}\"\n",
+            "  {color}[{label:>16}]{RESET}{warn}{restored_tag} {DIM}({fidelity}){RESET} {} [{env}] model={model_str} elapsed={} task=\"{task}\"\n",
             rec.id,
             fmt_age(elapsed),
         ));
@@ -322,8 +337,9 @@ pub fn render_floor(
         } else {
             ""
         };
+        let restored_note = if r.restored { " (restored)" } else { "" };
         out.push_str(&format!(
-            "  {tag} {} — next: {next} — bound: {bound}{staleness_note}\n",
+            "  {tag} {} — next: {next} — bound: {bound}{staleness_note}{restored_note}\n",
             r.name
         ));
         if let Some(p) = &r.prompt_redacted {
@@ -340,8 +356,9 @@ pub fn render_floor(
             store.checks.len()
         ));
         for c in store.checks.values() {
+            let restored_note = if c.restored { " (restored)" } else { "" };
             out.push_str(&format!(
-                "  {DIM}[{}]{RESET} {} — {}\n",
+                "  {DIM}[{}]{RESET} {} — {}{restored_note}\n",
                 c.source, c.id, c.label.value
             ));
         }

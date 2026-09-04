@@ -1,7 +1,15 @@
 //! THE FOUNDRY — Phase 1-3.5 CLI: watcher core + live text renderer.
 //!
 //! Usage:
-//!   foundry [--feed-dir DIR] [--git-dir DIR] [--no-remote] [--audit] [--watch SECS] [--log-dir DIR] [--bay-map PATH]
+//!   foundry [--feed-dir DIR] [--git-dir DIR] [--no-remote] [--audit] [--watch SECS] [--log-dir DIR] [--bay-map PATH] [--no-restore]
+//!
+//! S-01 persistence: `--log-dir` is also where `snapshot.json` lives. On
+//! startup (unless `--no-restore`) a prior snapshot is loaded and any
+//! logged events after its `last_seq` are replayed on top of it — but every
+//! restored record renders STALE/UNKNOWN "(restored)" and the pipeline
+//! stays UNVERIFIED until a fresh event from a real observer lands in THIS
+//! process (see `foundry_core::persist`). The snapshot is re-saved at the
+//! end of every poll cycle.
 //!
 //! Single-shot by default (poll once, render once, exit) — pass --watch N to
 //! poll every N seconds until Ctrl-C, which is closer to how the real
@@ -20,6 +28,7 @@ use foundry_core::eventlog::EventLog;
 use foundry_core::heartbeat::HeartbeatObserver;
 use foundry_core::local::{GitObserver, LocalClaudeObserver};
 use foundry_core::observer::{Observer, RemoteClaudeObserver, SyntheticCanary};
+use foundry_core::persist::{self, LoadOutcome};
 use foundry_core::reducer::StateStore;
 use foundry_core::render::{render_audit, render_floor};
 use std::path::PathBuf;
@@ -35,6 +44,9 @@ struct Args {
     watch_secs: Option<u64>,
     no_remote: bool,
     bay_map_path: PathBuf,
+    /// S-01: skip loading `<log-dir>/snapshot.json` at startup even if it
+    /// exists — always start from a clean, fully-fresh `StateStore`.
+    no_restore: bool,
 }
 
 fn parse_args() -> Args {
@@ -47,6 +59,7 @@ fn parse_args() -> Args {
     let mut watch_secs = None;
     let mut no_remote = false;
     let mut bay_map_path = PathBuf::from("foundry.bays.toml");
+    let mut no_restore = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -66,6 +79,7 @@ fn parse_args() -> Args {
             "--log-dir" => log_dir = PathBuf::from(args.next().expect("--log-dir needs a value")),
             "--audit" => audit = true,
             "--no-remote" => no_remote = true,
+            "--no-restore" => no_restore = true,
             "--bay-map" => {
                 bay_map_path = PathBuf::from(args.next().expect("--bay-map needs a value"))
             }
@@ -90,6 +104,7 @@ fn parse_args() -> Args {
         watch_secs,
         no_remote,
         bay_map_path,
+        no_restore,
     }
 }
 
@@ -104,9 +119,51 @@ fn main() {
         .as_ref()
         .map(|d| HeartbeatObserver::new(d, args.heartbeat_label.clone()));
     let mut canary = SyntheticCanary::new();
-    let mut store = StateStore::new();
     let mut log =
         EventLog::new(&args.log_dir, 50_000, 30).expect("failed to open event log directory");
+
+    // S-01 restart recovery: load the last snapshot (if any), replay
+    // anything logged after it, and mark every restored record honestly
+    // stale/unverified rather than trusting it as live.
+    let mut store = if args.no_restore {
+        StateStore::new()
+    } else {
+        match persist::load_snapshot(&args.log_dir) {
+            LoadOutcome::Missing => StateStore::new(),
+            LoadOutcome::Corrupted(msg) => {
+                eprintln!(
+                    "warning: snapshot at {} is corrupted/unreadable ({msg}) — starting fresh, nothing restored",
+                    args.log_dir.display()
+                );
+                StateStore::new()
+            }
+            LoadOutcome::Loaded(snapshot) => {
+                let mut restored_store = snapshot.store;
+                persist::mark_restored(&mut restored_store, snapshot.saved_at);
+                match log.events_since(snapshot.last_seq) {
+                    Ok(replay) => {
+                        let replay_events: Vec<_> = replay.into_iter().map(|pe| pe.event).collect();
+                        if !replay_events.is_empty() {
+                            restored_store.apply_events(&replay_events, Utc::now());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "warning: failed to read event log for replay after restore: {e}"
+                        );
+                    }
+                }
+                eprintln!(
+                    "restored snapshot from {} (saved {}, last_seq {}) — all sessions/routines/checks render STALE/UNKNOWN until re-observed this run",
+                    args.log_dir.display(),
+                    snapshot.saved_at,
+                    snapshot.last_seq,
+                );
+                restored_store
+            }
+        }
+    };
+
     let bay_map = match BayMap::load(&args.bay_map_path) {
         Ok(map) => map,
         Err(_) => {
@@ -155,6 +212,13 @@ fn main() {
 
         if let Err(e) = log.append(&all_events) {
             eprintln!("warning: event log write failed: {e}");
+        }
+
+        // S-01: persist the state store at the end of every poll cycle
+        // (single-shot runs get exactly one save; `--watch` saves on every
+        // cycle too, which trivially satisfies "every N cycles" for any N).
+        if let Err(e) = persist::save_snapshot(&args.log_dir, &store, log.last_seq(), now) {
+            eprintln!("warning: snapshot write failed: {e}");
         }
 
         let rendered = if args.audit {

@@ -3,10 +3,23 @@
 //! ever need to scrub anything again.
 
 use crate::schema::Event;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+
+/// S-01: the envelope actually written to and read from the JSONL log. The
+/// sequence number is bolted on here rather than onto `Event` itself —
+/// `Event` is the normalizer/reducer/render vocabulary (schema.rs's own
+/// doc comment forbids observer- or persistence-specific fields creeping in
+/// there); `seq` is purely a persistence-layer concern for ordering replay
+/// and for a snapshot's `last_seq` watermark.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedEvent {
+    pub seq: u64,
+    pub event: Event,
+}
 
 pub struct EventLog {
     ring: VecDeque<Event>,
@@ -15,6 +28,11 @@ pub struct EventLog {
     current_date: String,
     current_file: Option<File>,
     retention_files: usize,
+    /// S-01: the seq to assign to the NEXT persisted event. Recovered on
+    /// `new()` by scanning whatever JSONL files are already on disk, so
+    /// sequence numbers keep climbing across a restart instead of
+    /// restarting at 0 and colliding with (or shadowing) prior entries.
+    next_seq: u64,
 }
 
 impl EventLog {
@@ -24,6 +42,7 @@ impl EventLog {
         retention_files: usize,
     ) -> std::io::Result<Self> {
         fs::create_dir_all(&dir)?;
+        let next_seq = Self::recover_next_seq(dir.as_ref());
         Ok(Self {
             ring: VecDeque::with_capacity(ring_capacity.min(1 << 20)),
             ring_capacity,
@@ -31,7 +50,45 @@ impl EventLog {
             current_date: String::new(),
             current_file: None,
             retention_files,
+            next_seq,
         })
+    }
+
+    /// Scans every `events-*.jsonl` file in `dir` for the highest `seq` seen,
+    /// returning `max + 1` (or `0` if the directory has no readable entries
+    /// yet). Corrupted/unparseable lines are skipped rather than aborting
+    /// the scan — a single bad line must not block recovery of an otherwise
+    /// good log.
+    fn recover_next_seq(dir: &Path) -> u64 {
+        let mut max_seq: Option<u64> = None;
+        let Ok(entries) = fs::read_dir(dir) else {
+            return 0;
+        };
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+                if let Ok(f) = File::open(&path) {
+                    for line in std::io::BufReader::new(f).lines().map_while(Result::ok) {
+                        if let Ok(pe) = serde_json::from_str::<PersistedEvent>(&line) {
+                            max_seq = Some(max_seq.map_or(pe.seq, |m| m.max(pe.seq)));
+                        }
+                    }
+                }
+            }
+        }
+        max_seq.map_or(0, |m| m + 1)
+    }
+
+    /// The seq that will be assigned to the next appended event.
+    pub fn next_seq(&self) -> u64 {
+        self.next_seq
+    }
+
+    /// The highest seq assigned so far (`next_seq() - 1`), or `0` if nothing
+    /// has ever been persisted. This is what a snapshot's `last_seq`
+    /// watermark should be built from.
+    pub fn last_seq(&self) -> u64 {
+        self.next_seq.saturating_sub(1)
     }
 
     pub fn append(&mut self, events: &[Event]) -> std::io::Result<()> {
@@ -50,11 +107,46 @@ impl EventLog {
         if date != self.current_date || self.current_file.is_none() {
             self.rotate(&date)?;
         }
+        let seq = self.next_seq;
+        self.next_seq += 1;
         if let Some(f) = &mut self.current_file {
-            let line = serde_json::to_string(ev).unwrap_or_default();
+            let persisted = PersistedEvent {
+                seq,
+                event: ev.clone(),
+            };
+            let line = serde_json::to_string(&persisted).unwrap_or_default();
             writeln!(f, "{line}")?;
         }
         Ok(())
+    }
+
+    /// S-01 restart recovery: every persisted event with `seq > since_seq`,
+    /// across all `events-*.jsonl` files still on disk (pruned files are
+    /// simply gone — nothing to replay from them), sorted by seq. Corrupted
+    /// lines are skipped, matching `recover_next_seq`'s tolerance.
+    pub fn events_since(&self, since_seq: u64) -> std::io::Result<Vec<PersistedEvent>> {
+        let mut out = Vec::new();
+        let entries = match fs::read_dir(&self.dir) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+            Err(e) => return Err(e),
+        };
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+                if let Ok(f) = File::open(&path) {
+                    for line in std::io::BufReader::new(f).lines().map_while(Result::ok) {
+                        if let Ok(pe) = serde_json::from_str::<PersistedEvent>(&line) {
+                            if pe.seq > since_seq {
+                                out.push(pe);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        out.sort_by_key(|pe| pe.seq);
+        Ok(out)
     }
 
     fn rotate(&mut self, date: &str) -> std::io::Result<()> {

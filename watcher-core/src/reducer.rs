@@ -69,7 +69,31 @@ pub struct SessionRecord {
     /// state before a station folds down as ENDED — it must never just
     /// vanish from the floor without a trace (adversarial finding #5).
     pub gone_at: Option<DateTime<Utc>>,
+    /// S-01: this record's freshness budget. From `Event.ttl_secs`, or
+    /// `DEFAULT_SESSION_TTL_SECS` when the observer didn't supply one. If no
+    /// fresh `SessionObserved` event lands within this many seconds of
+    /// `last_polled_at`, `apply_ttls` marks the record expired/STALE rather
+    /// than keeping its last-known state alive forever.
+    pub ttl_secs: i64,
+    /// S-01 truth rule: true when this record's current values came from a
+    /// loaded snapshot (a prior process's state), not a live observation in
+    /// THIS process. Restored records must render as STALE/UNKNOWN — never
+    /// WORKING/IDLE/healthy — until a fresh event for this entity arrives,
+    /// which is when the reducer clears this flag.
+    #[serde(default)]
+    pub restored: bool,
+    #[serde(default)]
+    pub restored_at: Option<DateTime<Utc>>,
 }
+
+/// S-01 default freshness budget for a session record whose event carried no
+/// explicit `ttl_secs` — 15 minutes. Compared against `last_polled_at` (the
+/// last time we actually received a fresh observation for this record), not
+/// against the session's own `last_activity_at` (which is what stall
+/// derivation uses) — TTL is about how long an OBSERVATION stays trustworthy
+/// absent a newer one, not about how long the underlying session has been
+/// quiet.
+pub const DEFAULT_SESSION_TTL_SECS: i64 = 15 * 60;
 
 /// §16's 60s fading-then-ENDED grace window for a session that disappeared
 /// from the observer's snapshot.
@@ -92,6 +116,11 @@ pub struct RoutineRecord {
     /// current (adversarial finding #4: routines were never degraded at
     /// all, so a 2h-dead snapshot still rendered green "ON SCHEDULE").
     pub stale: bool,
+    /// S-01: see `SessionRecord::restored`.
+    #[serde(default)]
+    pub restored: bool,
+    #[serde(default)]
+    pub restored_at: Option<DateTime<Utc>>,
 }
 
 /// A deterministic-process observation (§1a: EQUIPMENT, not a session — no
@@ -108,12 +137,23 @@ pub struct CheckRecord {
     /// what "last output" rollups must use.
     pub last_event_ts: Option<DateTime<Utc>>,
     pub repo_hint: Option<String>,
+    /// S-01: see `SessionRecord::restored`.
+    #[serde(default)]
+    pub restored: bool,
+    #[serde(default)]
+    pub restored_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PipelineHealth {
     pub last_canary_at: Option<DateTime<Utc>>,
     pub last_any_event_at: Option<DateTime<Utc>>,
+    /// S-01: set when a snapshot is loaded at startup; cleared the moment a
+    /// fresh (non-canary-sourced) event lands. `pipeline_verified` must stay
+    /// false while this is set, even if the canary is ticking and no
+    /// observer is reporting Down — a restored floor is not a verified one.
+    #[serde(default)]
+    pub restored_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -133,6 +173,17 @@ impl StateStore {
     pub fn apply_events(&mut self, events: &[Event], now: DateTime<Utc>) {
         for ev in events {
             self.pipeline.last_any_event_at = Some(now);
+            // S-01: a fresh event from anything but the synthetic canary is
+            // exactly what "at least one real observer produced a fresh
+            // event post-restart" means — the canary alone only proves the
+            // poll loop is alive, not that any real observer re-observed
+            // anything. Clearing this here (not just in the per-entity
+            // handlers below) also covers event kinds with no dedicated
+            // handler yet, so restored-floor state can't accidentally get
+            // stuck for a kind this match arm doesn't special-case.
+            if ev.source != "synthetic_canary" {
+                self.pipeline.restored_at = None;
+            }
             match ev.kind {
                 EventKind::Heartbeat => {
                     self.pipeline.last_canary_at = Some(ev.ts);
@@ -144,6 +195,8 @@ impl StateStore {
                             rec.gone_at = Some(now);
                         }
                         rec.gone = true;
+                        rec.restored = false;
+                        rec.restored_at = None;
                         rec.displayed_state =
                             Field::new(StationState::StaleUnknown, now, Fidelity::Observed);
                     }
@@ -156,6 +209,29 @@ impl StateStore {
             }
         }
         self.derive_stalls(now);
+        self.apply_ttls(now);
+    }
+
+    /// S-01 point 4: an observation older than its TTL must not keep the
+    /// record's last-reported state alive forever — mark it expired/STALE.
+    /// Compared against `last_polled_at` (last time we actually received a
+    /// fresh observation), not `last_activity_at` (the session's own
+    /// activity clock, used separately by `derive_stalls`) — this is about
+    /// how long an OBSERVATION stays trustworthy absent a newer one.
+    fn apply_ttls(&mut self, now: DateTime<Utc>) {
+        for rec in self.sessions.values_mut() {
+            if rec.gone {
+                continue;
+            }
+            if rec.ttl_secs <= 0 {
+                continue;
+            }
+            let age = (now - rec.last_polled_at).num_seconds();
+            if age > rec.ttl_secs {
+                rec.displayed_state =
+                    Field::new(StationState::StaleUnknown, now, Fidelity::Unknown);
+            }
+        }
     }
 
     fn apply_session_observed(&mut self, ev: &Event, now: DateTime<Utc>) {
@@ -196,6 +272,9 @@ impl StateStore {
                 stall_warning: false,
                 gone: false,
                 gone_at: None,
+                ttl_secs: ev.ttl_secs.unwrap_or(DEFAULT_SESSION_TTL_SECS),
+                restored: false,
+                restored_at: None,
             });
         entry.observed_state = Field::new(state, now, ev.fidelity);
         entry.displayed_state = Field::new(state, now, ev.fidelity);
@@ -206,6 +285,11 @@ impl StateStore {
         }
         entry.gone = false;
         entry.gone_at = None;
+        entry.ttl_secs = ev.ttl_secs.unwrap_or(DEFAULT_SESSION_TTL_SECS);
+        // S-01: a fresh live observation for this entity means it is no
+        // longer a stale carry-over from a loaded snapshot.
+        entry.restored = false;
+        entry.restored_at = None;
         if ev.entity.parent_id.is_some() {
             entry.repo_hint = ev.entity.parent_id.clone();
         }
@@ -245,6 +329,8 @@ impl StateStore {
                 prompt_redacted: ev.detail.clone(),
                 last_seen_at: now,
                 stale: false,
+                restored: false,
+                restored_at: None,
             });
         entry.source = ev.source.clone();
         entry.name = ev.label.clone().unwrap_or_else(|| entry.name.clone());
@@ -253,6 +339,8 @@ impl StateStore {
         entry.enabled = ev.enabled.unwrap_or(entry.enabled);
         entry.next_run_at = ev.next_run_at.or(entry.next_run_at);
         entry.prompt_redacted = ev.detail.clone().or(entry.prompt_redacted.clone());
+        entry.restored = false;
+        entry.restored_at = None;
         entry.last_seen_at = now;
         entry.stale = false;
     }
@@ -278,6 +366,8 @@ impl StateStore {
                 last_seen_at: now,
                 last_event_ts: event_ts,
                 repo_hint: ev.entity.parent_id.clone(),
+                restored: false,
+                restored_at: None,
             });
         entry.source = ev.source.clone();
         entry.label = Field::new(label.clone(), now, ev.fidelity);
@@ -288,6 +378,8 @@ impl StateStore {
             entry.repo_hint = ev.entity.parent_id.clone();
         }
         entry.last_seen_at = now;
+        entry.restored = false;
+        entry.restored_at = None;
     }
 
     /// Rule 2: STALL derivation. Only sessions the observer reports as
@@ -296,6 +388,14 @@ impl StateStore {
     fn derive_stalls(&mut self, now: DateTime<Utc>) {
         for rec in self.sessions.values_mut() {
             if rec.gone {
+                continue;
+            }
+            // S-01: a record still carrying `observed_state: Working` from
+            // BEFORE a restart must not get re-derived into Hung here — it
+            // must stay the honest StaleUnknown `persist::mark_restored` set
+            // it to, until a fresh event actually re-observes it (which is
+            // exactly what clears `restored`).
+            if rec.restored {
                 continue;
             }
             if rec.observed_state.value != StationState::Working {
@@ -378,7 +478,11 @@ impl StateStore {
             Some(t) => (now - t).num_seconds() <= max_canary_age_secs,
             None => false,
         };
-        canary_fresh && !self.any_real_observer_down()
+        // S-01: a floor freshly loaded from a snapshot must not read as
+        // verified just because the canary is ticking and no observer
+        // happens to be Down — the canary AND at least one real observer
+        // must both have produced a fresh event in THIS process first.
+        canary_fresh && !self.any_real_observer_down() && self.pipeline.restored_at.is_none()
     }
 
     /// True if any observer other than the synthetic canary itself has gone

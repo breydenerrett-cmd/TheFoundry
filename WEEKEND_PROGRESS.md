@@ -46,3 +46,10 @@
 - Added `scripts/foundry_beat.sh` / `.py` + one-line beats in forward_capture, daily_loop, monitor_remote, test_parallel on a new branch off the live sports branch; draft PR https://github.com/breydenerrett-cmd/aisportsanalysis/pull/2. Helper is fail-safe (subshell, `|| true`, `set -u` safe), writes only fixed reasons / HTTP classes / pass counts. Verified with bash -n, py_compile, JSON validation, and a Foundry read of the emitted file.
 - Not merged autonomously: the base branch has routines and workers executing against it; merging is a safe-boundary decision for Brey. Real-event proof therefore pending → BLOCKED_HUMAN.
 - Sonnet worker ~98k tokens. S-01 persistence worker running.
+
+## 2026-09-04T22:40Z — S-01 persistent state
+
+- `persist.rs` + seq-numbered `PersistedEvent` envelope in the JSONL log; atomic `snapshot.json`; `--no-restore`. Restart truth rule enforced: restored sessions/routines/checks are tagged `(restored)` and forced STALE/UNKNOWN, observer health not restored, `pipeline_verified` false until canary + a real observer fire post-restart; per-record staleness persists until that entity is re-observed. TTL expiry (`DEFAULT_SESSION_TTL_SECS=900`). Corrupted snapshot → warning, not crash.
+- Bug found by the restart demo: `derive_stalls` re-derived HUNG over restored records — fixed (skips restored).
+- Tests 64 → **74**; clippy/fmt clean. Sonnet worker ~189k tokens (largest so far).
+- Next: M-01 multi-machine agent; V-01 visual foundation running in `app/`.

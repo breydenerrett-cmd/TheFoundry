@@ -4,6 +4,7 @@ pub mod health;
 pub mod heartbeat;
 pub mod local;
 pub mod observer;
+pub mod persist;
 pub mod redact;
 pub mod reducer;
 pub mod render;
