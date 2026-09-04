@@ -20,7 +20,7 @@ fn poll_once(feed_dir: &Path, now: DateTime<Utc>) -> (StateStore, String) {
     let events = obs.poll(now);
     let mut store = StateStore::new();
     store.apply_events(&events, now);
-    store.apply_observer_health(obs.health(), now);
+    store.apply_observer_health(obs.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
     let text = render_floor(&store, now);
     (store, text)
 }
@@ -189,7 +189,7 @@ fn observer_down_after_a_healthy_poll_degrades_existing_sessions() {
 
     let events1 = obs.poll(now);
     store.apply_events(&events1, now);
-    store.apply_observer_health(obs.health(), now);
+    store.apply_observer_health(obs.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
     assert_eq!(store.sessions["session_ok_then_blind"].displayed_state.value, foundry_core::schema::StationState::Working);
 
     // Now the feed goes dark (file removed — network severed).
@@ -197,7 +197,7 @@ fn observer_down_after_a_healthy_poll_degrades_existing_sessions() {
     let later = now + Duration::seconds(10);
     let events2 = obs.poll(later);
     store.apply_events(&events2, later);
-    store.apply_observer_health(obs.health(), later);
+    store.apply_observer_health(obs.health(), later, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
 
     let rec = &store.sessions["session_ok_then_blind"];
     assert_eq!(rec.displayed_state.value, foundry_core::schema::StationState::StaleUnknown, "must not still read Working once the observer is Down");
@@ -249,8 +249,8 @@ fn dead_remote_observer_is_unverified_even_with_a_live_canary() {
         let mut events = remote.poll(t);
         events.extend(canary.poll(t));
         store.apply_events(&events, t);
-        store.apply_observer_health(remote.health(), t);
-        store.apply_observer_health(canary.health(), t);
+        store.apply_observer_health(remote.health(), t, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+        store.apply_observer_health(canary.health(), t, None, None);
     }
     assert_eq!(remote.health().status, foundry_core::health::ObserverStatus::Down);
 
@@ -286,7 +286,7 @@ fn partial_capability_loss_degrades_only_the_lost_capability() {
     let mut store = StateStore::new();
     let events1 = remote.poll(now);
     store.apply_events(&events1, now);
-    store.apply_observer_health(remote.health(), now);
+    store.apply_observer_health(remote.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
     assert_eq!(store.sessions["session_partial"].displayed_state.value, foundry_core::schema::StationState::Working);
     assert!(!store.routines["trig_partial"].stale);
 
@@ -295,7 +295,7 @@ fn partial_capability_loss_degrades_only_the_lost_capability() {
     let later = now + Duration::seconds(10);
     let events2 = remote.poll(later);
     store.apply_events(&events2, later);
-    store.apply_observer_health(remote.health(), later);
+    store.apply_observer_health(remote.health(), later, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
 
     assert_eq!(
         store.sessions["session_partial"].displayed_state.value,
@@ -362,7 +362,7 @@ fn routines_go_stale_when_routines_capability_is_lost() {
     let mut store = StateStore::new();
     let events1 = remote.poll(now);
     store.apply_events(&events1, now);
-    store.apply_observer_health(remote.health(), now);
+    store.apply_observer_health(remote.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
     assert!(store.routines["trig_x"].overdue);
     assert!(!store.routines["trig_x"].stale);
     let text1 = render_floor(&store, now);
@@ -372,7 +372,7 @@ fn routines_go_stale_when_routines_capability_is_lost() {
     let later = now + Duration::hours(2);
     let events2 = remote.poll(later);
     store.apply_events(&events2, later);
-    store.apply_observer_health(remote.health(), later);
+    store.apply_observer_health(remote.health(), later, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
 
     assert!(store.routines["trig_x"].stale, "routine must be marked stale once its capability is lost");
     let text2 = render_floor(&store, later);
@@ -421,7 +421,7 @@ fn vanished_session_fades_then_folds_with_a_trace_not_silently() {
     let mut store = StateStore::new();
     let events1 = remote.poll(now);
     store.apply_events(&events1, now);
-    store.apply_observer_health(remote.health(), now);
+    store.apply_observer_health(remote.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
     assert!(store.sessions.contains_key("session_will_vanish"));
 
     // The session vanishes from the next snapshot entirely.
@@ -429,7 +429,7 @@ fn vanished_session_fades_then_folds_with_a_trace_not_silently() {
     let just_after = now + Duration::seconds(5);
     let events2 = remote.poll(just_after);
     store.apply_events(&events2, just_after);
-    store.apply_observer_health(remote.health(), just_after);
+    store.apply_observer_health(remote.health(), just_after, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
 
     assert!(store.sessions["session_will_vanish"].gone);
     let text_fading = render_floor(&store, just_after);
@@ -479,4 +479,59 @@ fn secrets_in_raw_session_text_are_redacted_end_to_end() {
     assert!(!label.contains("brey@example.com"), "email must be redacted: {label}");
     assert!(!text.contains("sk-abcdefghij1234567890"), "must not reach the rendered text either: {text}");
     assert!(!text.contains("brey@example.com"));
+}
+
+/// Regression: TWO different observers can legitimately source SessionObserved
+/// records under DIFFERENT capability names (remote_claude uses "sessions",
+/// local_claude uses "local_sessions"). apply_observer_health must check each
+/// observer against ITS OWN capability name — hardcoding one name (as an
+/// earlier version of this fix did) falsely degraded the second observer's
+/// perfectly healthy sessions, because it never reports the first observer's
+/// capability name.
+#[test]
+fn distinct_observers_with_different_session_capability_names_dont_shadow_each_other() {
+    use foundry_core::health::ObserverHealth;
+    use foundry_core::reducer::StateStore;
+    use foundry_core::schema::{EntityRef, EntityType, EventKind, Fidelity, Metrics, StationState};
+
+    let now = Utc::now();
+    let mut store = StateStore::new();
+
+    let remote_event = foundry_core::schema::Event {
+        ts: now,
+        source: "remote_claude".into(),
+        kind: EventKind::SessionObserved,
+        entity: EntityRef::new(EntityType::Session, "session_remote"),
+        project_id: None,
+        session_id: Some("session_remote".into()),
+        model: None, model_current: None, model_last_served: None, effort: None,
+        state: Some(StationState::Working),
+        label: None, detail: None,
+        fidelity: Fidelity::Observed,
+        metrics: Metrics::default(), ttl_secs: None, next_run_at: None, enabled: None,
+    };
+    let mut local_event = remote_event.clone();
+    local_event.source = "local_claude".into();
+    local_event.entity = EntityRef::new(EntityType::Session, "sid_local");
+    local_event.session_id = Some("sid_local".into());
+    local_event.fidelity = Fidelity::Inferred;
+
+    store.apply_events(&[remote_event, local_event], now);
+
+    let mut remote_health = ObserverHealth::new("remote_claude");
+    remote_health.record_success(now, foundry_core::health::CapabilitySet::from_iter(["sessions"]));
+    let mut local_health = ObserverHealth::new("local_claude");
+    local_health.record_success(now, foundry_core::health::CapabilitySet::from_iter(["local_sessions"]));
+
+    store.apply_observer_health(&remote_health, now, Some("sessions"), Some("routines"));
+    store.apply_observer_health(&local_health, now, Some("local_sessions"), None);
+
+    assert_eq!(
+        store.sessions["session_remote"].displayed_state.value, StationState::Working,
+        "remote-sourced session must stay healthy — its own capability (sessions) is present"
+    );
+    assert_eq!(
+        store.sessions["sid_local"].displayed_state.value, StationState::Working,
+        "local-sourced session must ALSO stay healthy — its own capability (local_sessions) is present, even though remote_claude's capability name differs"
+    );
 }

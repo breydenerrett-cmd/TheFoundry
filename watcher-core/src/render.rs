@@ -5,6 +5,7 @@
 //! reading a terminal, nothing here depends on it being present.
 
 use crate::health::ObserverStatus;
+use crate::local::CAP_LOCAL_SESSIONS;
 use crate::observer::CAP_SESSIONS;
 use crate::reducer::{StateStore, GONE_FADE_SECS};
 use crate::schema::{Fidelity, StationState};
@@ -110,7 +111,7 @@ pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
     // same. `sessions_confirmed` is true only if some observer THIS poll
     // actually reported the sessions capability — only then is an empty
     // count a real fact rather than a blind spot (adversarial finding #3).
-    let sessions_confirmed = store.observer_health.values().any(|h| h.capabilities.has(CAP_SESSIONS));
+    let sessions_confirmed = store.observer_health.values().any(|h| h.capabilities.has(CAP_SESSIONS) || h.capabilities.has(CAP_LOCAL_SESSIONS));
     let counts_str: Vec<String> = counts.iter().map(|(k, v)| format!("{v} {k}")).collect();
     let sessions_summary = if counts_str.is_empty() {
         if sessions_confirmed {
@@ -217,6 +218,15 @@ pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
     out.push('\n');
 
     // Observer health.
+    // Checks (§1a EQUIPMENT — deterministic facts, e.g. git state).
+    if !store.checks.is_empty() {
+        out.push_str(&format!("{BOLD}CHECKS{RESET} ({} observed)\n", store.checks.len()));
+        for c in store.checks.values() {
+            out.push_str(&format!("  {DIM}[{}]{RESET} {} — {}\n", c.source, c.id, c.label.value));
+        }
+        out.push('\n');
+    }
+
     out.push_str(&format!("{BOLD}OBSERVERS{RESET}\n"));
     for h in store.observer_health.values() {
         let status_color = match h.status {

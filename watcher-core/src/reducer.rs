@@ -88,6 +88,17 @@ pub struct RoutineRecord {
     pub stale: bool,
 }
 
+/// A deterministic-process observation (§1a: EQUIPMENT, not a session — no
+/// reasoning loop, so no Working/Thinking states, just an observed fact).
+/// Currently used by `GitObserver`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckRecord {
+    pub id: String,
+    pub source: String,
+    pub label: Field<String>,
+    pub last_seen_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PipelineHealth {
     pub last_canary_at: Option<DateTime<Utc>>,
@@ -98,6 +109,7 @@ pub struct PipelineHealth {
 pub struct StateStore {
     pub sessions: BTreeMap<String, SessionRecord>,
     pub routines: BTreeMap<String, RoutineRecord>,
+    pub checks: BTreeMap<String, CheckRecord>,
     pub observer_health: BTreeMap<String, ObserverHealth>,
     pub pipeline: PipelineHealth,
 }
@@ -127,6 +139,7 @@ impl StateStore {
                 EventKind::RoutineScheduled | EventKind::RoutineOverdue => {
                     self.apply_routine(ev, now, ev.kind == EventKind::RoutineOverdue);
                 }
+                EventKind::WorktreeChanged => self.apply_check(ev, now),
                 _ => {}
             }
         }
@@ -219,6 +232,19 @@ impl StateStore {
         entry.stale = false;
     }
 
+    fn apply_check(&mut self, ev: &Event, now: DateTime<Utc>) {
+        let Some(label) = &ev.label else { return };
+        let entry = self.checks.entry(ev.entity.id.clone()).or_insert_with(|| CheckRecord {
+            id: ev.entity.id.clone(),
+            source: ev.source.clone(),
+            label: Field::new(label.clone(), now, ev.fidelity),
+            last_seen_at: now,
+        });
+        entry.source = ev.source.clone();
+        entry.label = Field::new(label.clone(), now, ev.fidelity);
+        entry.last_seen_at = now;
+    }
+
     /// Rule 2: STALL derivation. Only sessions the observer reports as
     /// Working can go Hung — everything else is already an intentional
     /// "stopped" state and hanging is not a meaningful concept for it.
@@ -254,21 +280,34 @@ impl StateStore {
     /// checks `health.capabilities` per capability instead of trusting the
     /// single rolled-up `status` enum. It does NOT leave anything frozen at
     /// its last-good value, which would silently look healthy forever.
-    pub fn apply_observer_health(&mut self, health: &ObserverHealth, now: DateTime<Utc>) {
-        let sessions_lost = !health.capabilities.has(CAP_SESSIONS);
-        let routines_lost = !health.capabilities.has(CAP_ROUTINES);
+    /// `sessions_cap`/`routines_cap`: the capability NAME this specific
+    /// observer uses to say "I can supply session/routine records" — pass
+    /// `None` for an observer that never sources that kind of record at
+    /// all (e.g. `git` sources neither). Different observers legitimately
+    /// use different capability names for the same kind of record (e.g.
+    /// `remote_claude` uses "sessions", `local_claude` uses
+    /// "local_sessions") — hardcoding a single name here was itself a bug
+    /// caught while wiring up Phase 3.5's second sessions-sourcing
+    /// observer: it made local_claude's sessions look permanently degraded
+    /// because it (correctly) never reports the *other* observer's
+    /// capability name.
+    pub fn apply_observer_health(&mut self, health: &ObserverHealth, now: DateTime<Utc>, sessions_cap: Option<&str>, routines_cap: Option<&str>) {
+        let sessions_lost = sessions_cap.map(|cap| !health.capabilities.has(cap));
+        let routines_lost = routines_cap.map(|cap| !health.capabilities.has(cap));
         self.observer_health.insert(health.name.clone(), health.clone());
 
-        if sessions_lost {
+        if let Some(true) = sessions_lost {
             for rec in self.sessions.values_mut() {
                 if rec.source == health.name {
                     rec.displayed_state = Field::new(StationState::StaleUnknown, now, Fidelity::Unknown);
                 }
             }
         }
-        for rec in self.routines.values_mut() {
-            if rec.source == health.name {
-                rec.stale = routines_lost;
+        if let Some(lost) = routines_lost {
+            for rec in self.routines.values_mut() {
+                if rec.source == health.name {
+                    rec.stale = lost;
+                }
             }
         }
     }
@@ -389,7 +428,7 @@ mod tests {
         health.record_failure("e3"); // -> Down
         assert_eq!(health.status, ObserverStatus::Down);
 
-        store.apply_observer_health(&health, t0 + chrono::Duration::seconds(30));
+        store.apply_observer_health(&health, t0 + chrono::Duration::seconds(30), Some(CAP_SESSIONS), Some(CAP_ROUTINES));
         assert_eq!(store.sessions["s1"].displayed_state.value, StationState::StaleUnknown);
         assert_eq!(store.sessions["s1"].displayed_state.fidelity, Fidelity::Unknown);
     }
