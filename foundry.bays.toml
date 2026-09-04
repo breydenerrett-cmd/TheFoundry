@@ -1,0 +1,30 @@
+# THE FOUNDRY — project resolution map (Phase 4E v2, §9).
+#
+# Resolution order: [repos] (explicit repo identity — "owner/name" from a
+# git URL, or a path basename, case-insensitive) -> [rules] (ordered
+# substring rules on the raw hint, only tried if [repos] misses) -> [tags]
+# (session tags, when present) -> UNRESOLVED. A hint that matches nothing
+# stays UNRESOLVED — it is never guessed into one of the six real bays.
+
+[repos]
+"breydenerrett-cmd/aisportsanalysis" = "SPORTS LAB"
+"breydenerrett-cmd/TheFoundry" = "EXPERIMENTS"
+
+[rules]
+"aisportsanalysis" = "SPORTS LAB"
+"sports" = "SPORTS LAB"
+"linehound" = "SPORTS LAB"
+"resume-business" = "AI BUSINESS COMPLEX"
+"agency" = "AI BUSINESS COMPLEX"
+"pureline" = "AI BUSINESS COMPLEX"
+"lead-gen" = "AI BUSINESS COMPLEX"
+"lead_gen" = "AI BUSINESS COMPLEX"
+"fivem" = "SERVERFORGE"
+"qbcore" = "SERVERFORGE"
+"serverforge" = "SERVERFORGE"
+"music" = "MUSIC LAB"
+
+[tags]
+# TODO: populate once session records carry a tags field — BayMap::resolve
+# already checks [tags] against any tags passed in, so entries here take
+# effect the moment a caller supplies real tags.

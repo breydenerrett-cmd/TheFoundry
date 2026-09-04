@@ -42,7 +42,7 @@ pub struct SessionRecord {
     pub id: String,
     pub source: String,
     /// §9/Phase 4E: whatever repo/cwd hint the observer could supply, used
-    /// by `bay::resolve_bay` to group this session into a project bay.
+    /// by `bay::BayMap::resolve` to group this session into a project bay.
     pub repo_hint: Option<String>,
     /// Observed state as reported by the observer — before stall derivation.
     pub observed_state: Field<StationState>,

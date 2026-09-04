@@ -33,3 +33,10 @@
 
 **Model usage**: one Sonnet worker (~106k tokens) for the fix; Fable orchestration.
 **Next**: P-01 project resolution v2 (UNRESOLVED bay, explicit map), then S-01 persistence.
+
+## 2026-09-04T22:05Z — P-01 project resolution v2
+
+- `BayMap` loaded from `foundry.bays.toml` (`--bay-map PATH`): explicit `[repos]` identity (owner/name from git URL or path basename) → ordered `[rules]` substrings → `[tags]` → **UNRESOLVED**. The old defaults (`None` → PERSONAL/MISC, unmatched → EXPERIMENTS) were guesses and are gone; UNRESOLVED renders as its own last group `▸ UNRESOLVED (no repo/tag match — not guessed)`. Missing map file → everything UNRESOLVED + stderr note, never an error.
+- Tests 58 → **64**; clippy/fmt clean. New dep: `toml`.
+- Known gap unchanged: the remote fixture carries no repo URL, so remote sessions are UNRESOLVED until the refresh snapshot includes `sources[].git_repository.url`.
+- Sonnet worker ~113k tokens. Next: S-01 persistence; H-01 running in parallel (separate repo worktree).

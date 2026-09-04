@@ -5,6 +5,7 @@
 //! actually blind, stale, or fed garbage.
 
 use chrono::{DateTime, Duration, Utc};
+use foundry_core::bay::BayMap;
 use foundry_core::observer::{Observer, RemoteClaudeObserver, SyntheticCanary};
 use foundry_core::reducer::StateStore;
 use foundry_core::render::render_floor;
@@ -26,7 +27,7 @@ fn poll_once(feed_dir: &Path, now: DateTime<Utc>) -> (StateStore, String) {
         Some(foundry_core::observer::CAP_SESSIONS),
         Some(foundry_core::observer::CAP_ROUTINES),
     );
-    let text = render_floor(&store, now);
+    let text = render_floor(&store, now, &BayMap::new());
     (store, text)
 }
 
@@ -325,7 +326,7 @@ fn dead_remote_observer_is_unverified_even_with_a_live_canary() {
     );
 
     let final_now = now + Duration::seconds(3);
-    let text = render_floor(&store, final_now);
+    let text = render_floor(&store, final_now, &BayMap::new());
     assert!(
         !store.pipeline_verified(final_now, 300),
         "must not be verified while remote_claude is Down"
@@ -463,7 +464,7 @@ fn routines_go_stale_when_routines_capability_is_lost() {
     );
     assert!(store.routines["trig_x"].overdue);
     assert!(!store.routines["trig_x"].stale);
-    let text1 = render_floor(&store, now);
+    let text1 = render_floor(&store, now, &BayMap::new());
     assert!(text1.contains("[OVERDUE]"));
 
     fs::remove_file(dir.path().join("list_triggers.json")).unwrap();
@@ -481,7 +482,7 @@ fn routines_go_stale_when_routines_capability_is_lost() {
         store.routines["trig_x"].stale,
         "routine must be marked stale once its capability is lost"
     );
-    let text2 = render_floor(&store, later);
+    let text2 = render_floor(&store, later, &BayMap::new());
     assert!(text2.contains("[STALE]"), "a stale routine must render distinctly, not still confidently OVERDUE/ON SCHEDULE: {text2}");
 }
 
@@ -557,7 +558,7 @@ fn vanished_session_fades_then_folds_with_a_trace_not_silently() {
     );
 
     assert!(store.sessions["session_will_vanish"].gone);
-    let text_fading = render_floor(&store, just_after);
+    let text_fading = render_floor(&store, just_after, &BayMap::new());
     assert!(
         text_fading.contains("session_will_vanish") && text_fading.contains("FADING"),
         "within the 60s grace window the vanished session must still be visible, distinctly tagged: {text_fading}"
@@ -565,7 +566,7 @@ fn vanished_session_fades_then_folds_with_a_trace_not_silently() {
 
     // Well past the 60s fade window.
     let long_after = now + Duration::seconds(300);
-    let text_ended = render_floor(&store, long_after);
+    let text_ended = render_floor(&store, long_after, &BayMap::new());
     assert!(
         !text_ended.contains("session_will_vanish"),
         "past the fade window it should no longer clutter the main list"

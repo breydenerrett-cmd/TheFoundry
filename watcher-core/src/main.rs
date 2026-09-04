@@ -1,7 +1,7 @@
 //! THE FOUNDRY — Phase 1-3.5 CLI: watcher core + live text renderer.
 //!
 //! Usage:
-//!   foundry [--feed-dir DIR] [--git-dir DIR] [--no-remote] [--audit] [--watch SECS] [--log-dir DIR]
+//!   foundry [--feed-dir DIR] [--git-dir DIR] [--no-remote] [--audit] [--watch SECS] [--log-dir DIR] [--bay-map PATH]
 //!
 //! Single-shot by default (poll once, render once, exit) — pass --watch N to
 //! poll every N seconds until Ctrl-C, which is closer to how the real
@@ -15,6 +15,7 @@
 //! PHASE3_5_ACCESS_BRIDGE.md.
 
 use chrono::Utc;
+use foundry_core::bay::BayMap;
 use foundry_core::eventlog::EventLog;
 use foundry_core::heartbeat::HeartbeatObserver;
 use foundry_core::local::{GitObserver, LocalClaudeObserver};
@@ -33,6 +34,7 @@ struct Args {
     audit: bool,
     watch_secs: Option<u64>,
     no_remote: bool,
+    bay_map_path: PathBuf,
 }
 
 fn parse_args() -> Args {
@@ -44,6 +46,7 @@ fn parse_args() -> Args {
     let mut audit = false;
     let mut watch_secs = None;
     let mut no_remote = false;
+    let mut bay_map_path = PathBuf::from("foundry.bays.toml");
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -63,6 +66,9 @@ fn parse_args() -> Args {
             "--log-dir" => log_dir = PathBuf::from(args.next().expect("--log-dir needs a value")),
             "--audit" => audit = true,
             "--no-remote" => no_remote = true,
+            "--bay-map" => {
+                bay_map_path = PathBuf::from(args.next().expect("--bay-map needs a value"))
+            }
             "--watch" => {
                 let secs: u64 = args
                     .next()
@@ -83,6 +89,7 @@ fn parse_args() -> Args {
         audit,
         watch_secs,
         no_remote,
+        bay_map_path,
     }
 }
 
@@ -100,6 +107,16 @@ fn main() {
     let mut store = StateStore::new();
     let mut log =
         EventLog::new(&args.log_dir, 50_000, 30).expect("failed to open event log directory");
+    let bay_map = match BayMap::load(&args.bay_map_path) {
+        Ok(map) => map,
+        Err(_) => {
+            eprintln!(
+                "note: no bay map at {} — everything will be UNRESOLVED",
+                args.bay_map_path.display()
+            );
+            BayMap::new()
+        }
+    };
 
     loop {
         let now = Utc::now();
@@ -141,9 +158,9 @@ fn main() {
         }
 
         let rendered = if args.audit {
-            render_audit(&store, now, &args.feed_dir)
+            render_audit(&store, now, &args.feed_dir, &bay_map)
         } else {
-            render_floor(&store, now)
+            render_floor(&store, now, &bay_map)
         };
 
         // Clear-ish separation between polls when watching, so it reads like

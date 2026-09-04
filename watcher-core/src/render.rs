@@ -69,7 +69,11 @@ fn fmt_age(secs: i64) -> String {
 }
 
 /// Renders the estate-wide floor as plain text (§4 L1/L3 content, no visuals).
-pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
+pub fn render_floor(
+    store: &StateStore,
+    now: DateTime<Utc>,
+    bay_map: &crate::bay::BayMap,
+) -> String {
     let mut out = String::new();
     let pipeline_ok = store.pipeline_verified(now, 300);
 
@@ -200,15 +204,25 @@ pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
     // trace (adversarial finding #5). `ended_count` tallies everything past
     // the fade window so the footer still acknowledges it happened.
     let mut ended_count = 0u32;
-    let mut by_bay: std::collections::BTreeMap<&str, Vec<_>> = std::collections::BTreeMap::new();
+    let mut by_bay: std::collections::BTreeMap<String, Vec<_>> = std::collections::BTreeMap::new();
     for rec in store.sessions.values() {
-        by_bay
-            .entry(crate::bay::resolve_bay(rec.repo_hint.as_deref()))
-            .or_default()
-            .push(rec);
+        let resolution = bay_map.resolve(rec.repo_hint.as_deref(), &[]);
+        by_bay.entry(resolution.bay).or_default().push(rec);
     }
-    for (bay, recs) in by_bay {
-        out.push_str(&format!("  {BOLD}▸ {bay}{RESET}\n"));
+    // UNRESOLVED is a distinct display group and always renders last, after
+    // the six real bays (which sort alphabetically among themselves).
+    let unresolved_recs = by_bay.remove(crate::bay::UNRESOLVED);
+    let ordered_bays = by_bay
+        .into_iter()
+        .chain(unresolved_recs.map(|recs| (crate::bay::UNRESOLVED.to_string(), recs)));
+    for (bay, recs) in ordered_bays {
+        if bay == crate::bay::UNRESOLVED {
+            out.push_str(&format!(
+                "  {BOLD}▸ {bay} (no repo/tag match — not guessed){RESET}\n"
+            ));
+        } else {
+            out.push_str(&format!("  {BOLD}▸ {bay}{RESET}\n"));
+        }
         for rec in recs {
             if rec.gone {
                 let faded_secs = rec
@@ -365,9 +379,14 @@ pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
 
 /// `--audit`: state-store view side by side with the raw feed files it was
 /// built from, so a human can spot-check the mapping directly (§18).
-pub fn render_audit(store: &StateStore, now: DateTime<Utc>, feed_dir: &Path) -> String {
+pub fn render_audit(
+    store: &StateStore,
+    now: DateTime<Utc>,
+    feed_dir: &Path,
+    bay_map: &crate::bay::BayMap,
+) -> String {
     let mut out = String::new();
-    out.push_str(&render_floor(store, now));
+    out.push_str(&render_floor(store, now, bay_map));
     out.push_str(&format!(
         "\n{BOLD}── AUDIT: raw feed vs normalized state ──{RESET}\n"
     ));
