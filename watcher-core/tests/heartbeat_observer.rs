@@ -21,10 +21,23 @@ fn reads_real_heartbeat_lines_and_redacts_errors() {
     let mut obs = HeartbeatObserver::new(dir.path(), "SPORTS LAB");
     let events = obs.poll(now);
     assert_eq!(events.len(), 2);
-    let escalate = events.iter().find(|e| e.label.as_deref().unwrap().contains("daily_loop")).unwrap();
+    let escalate = events
+        .iter()
+        .find(|e| e.label.as_deref().unwrap().contains("daily_loop"))
+        .unwrap();
     assert!(escalate.label.as_deref().unwrap().contains("ESCALATE"));
-    assert!(!escalate.label.as_deref().unwrap().contains("/home/user/secretproj"), "path in error field must be redacted");
-    assert_eq!(obs.health().status, foundry_core::health::ObserverStatus::Healthy);
+    assert!(
+        !escalate
+            .label
+            .as_deref()
+            .unwrap()
+            .contains("/home/user/secretproj"),
+        "path in error field must be redacted"
+    );
+    assert_eq!(
+        obs.health().status,
+        foundry_core::health::ObserverStatus::Healthy
+    );
 }
 
 #[test]
@@ -42,7 +55,10 @@ fn one_malformed_line_does_not_lose_the_rest() {
     let mut obs = HeartbeatObserver::new(dir.path(), "SPORTS LAB");
     let events = obs.poll(now);
     assert_eq!(events.len(), 1);
-    assert_eq!(obs.health().status, foundry_core::health::ObserverStatus::Healthy);
+    assert_eq!(
+        obs.health().status,
+        foundry_core::health::ObserverStatus::Healthy
+    );
 }
 
 #[test]
@@ -51,5 +67,8 @@ fn missing_file_degrades_honestly_not_a_panic() {
     let mut obs = HeartbeatObserver::new(dir.path(), "SPORTS LAB");
     let events = obs.poll(Utc::now());
     assert!(events.is_empty());
-    assert_ne!(obs.health().status, foundry_core::health::ObserverStatus::Healthy);
+    assert_ne!(
+        obs.health().status,
+        foundry_core::health::ObserverStatus::Healthy
+    );
 }

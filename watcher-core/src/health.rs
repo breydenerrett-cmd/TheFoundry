@@ -13,6 +13,7 @@ impl CapabilitySet {
     pub fn new() -> Self {
         Self(BTreeSet::new())
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_iter<I: IntoIterator<Item = &'static str>>(iter: I) -> Self {
         Self(iter.into_iter().map(|s| s.to_string()).collect())
     }
@@ -64,6 +65,19 @@ pub struct ObserverHealth {
     pub last_success_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
     pub consecutive_failures: u32,
+    /// Whether this observer overrides freshness reporting with an explicit
+    /// data-capture timestamp (see `set_data_age`) rather than the poll time
+    /// in `last_success_at`. Most observers never call `set_data_age`, so
+    /// `last_sync_age_secs` keeps its original poll-time semantics for them.
+    #[serde(default)]
+    data_age_tracked: bool,
+    /// When `data_age_tracked` is true: the timestamp the underlying data was
+    /// actually captured/observed, if known. `None` means the observer knows
+    /// it is tracking data age but could not determine one (e.g. a snapshot
+    /// with no capture timestamp) — freshness must then read as unknown, not
+    /// silently fall back to poll time.
+    #[serde(default)]
+    data_observed_at: Option<DateTime<Utc>>,
 }
 
 impl ObserverHealth {
@@ -76,6 +90,8 @@ impl ObserverHealth {
             last_success_at: None,
             last_error: None,
             consecutive_failures: 0,
+            data_age_tracked: false,
+            data_observed_at: None,
         }
     }
 
@@ -88,7 +104,9 @@ impl ObserverHealth {
         // supply? A non-empty `capabilities` this poll is not enough to call
         // the observer Healthy if it used to also give us more.
         let regressed = !capabilities.lost_since(&self.known_capabilities).is_empty();
-        self.known_capabilities.0.extend(capabilities.0.iter().cloned());
+        self.known_capabilities
+            .0
+            .extend(capabilities.0.iter().cloned());
         self.capabilities = capabilities;
 
         self.status = if self.capabilities.0.is_empty() {
@@ -117,9 +135,39 @@ impl ObserverHealth {
         };
     }
 
-    /// Age of the last successful poll, or None if never succeeded.
+    /// Age of the last successful poll, or None if never succeeded. For an
+    /// observer that has called `set_data_age`, this instead reports the age
+    /// of the underlying DATA (e.g. when a remote snapshot was captured),
+    /// which can be far older than the poll that merely read it off disk —
+    /// and is `None` if that data-capture time is tracked but unknown.
     pub fn last_sync_age_secs(&self, now: DateTime<Utc>) -> Option<i64> {
+        if self.data_age_tracked {
+            return self
+                .data_observed_at
+                .map(|t| (now - t).num_seconds().max(0));
+        }
         self.last_success_at.map(|t| (now - t).num_seconds().max(0))
+    }
+
+    /// Records the actual capture/observation time of the data this observer
+    /// just supplied, when that differs from poll time (e.g. a snapshot file
+    /// read off disk long after it was written). Once called, freshness
+    /// reporting (`last_sync_age_secs`) is driven by this instead of
+    /// `last_success_at`.
+    ///
+    /// `captured_at: None` means the observer knows it should be tracking
+    /// data age but could not determine one this poll (missing/invalid
+    /// capture timestamp) — never render old data as current, so this forces
+    /// the status to `Degraded` (unless already `Down`) with an explanatory
+    /// `last_error`, rather than leaving a `Healthy` status paired with an
+    /// unknown age.
+    pub fn set_data_age(&mut self, captured_at: Option<DateTime<Utc>>) {
+        self.data_age_tracked = true;
+        self.data_observed_at = captured_at;
+        if captured_at.is_none() && self.status != ObserverStatus::Down {
+            self.status = ObserverStatus::Degraded;
+            self.last_error = Some("snapshot has no captured_at — age unknown".to_string());
+        }
     }
 }
 
@@ -139,7 +187,10 @@ mod tests {
         let before = CapabilitySet::from_iter(["sessions", "permissions", "worktree"]);
         let after = CapabilitySet::from_iter(["sessions"]);
         let lost = after.lost_since(&before);
-        assert_eq!(lost, vec!["permissions".to_string(), "worktree".to_string()]);
+        assert_eq!(
+            lost,
+            vec!["permissions".to_string(), "worktree".to_string()]
+        );
     }
 
     #[test]
@@ -148,11 +199,18 @@ mod tests {
         // parses must NOT read as Healthy just because capabilities is
         // non-empty — it used to have more.
         let mut h = ObserverHealth::new("remote_claude");
-        h.record_success(Utc::now(), CapabilitySet::from_iter(["sessions", "routines"]));
+        h.record_success(
+            Utc::now(),
+            CapabilitySet::from_iter(["sessions", "routines"]),
+        );
         assert_eq!(h.status, ObserverStatus::Healthy);
 
         h.record_success(Utc::now(), CapabilitySet::from_iter(["routines"]));
-        assert_eq!(h.status, ObserverStatus::Degraded, "lost `sessions` — must not still read Healthy");
+        assert_eq!(
+            h.status,
+            ObserverStatus::Degraded,
+            "lost `sessions` — must not still read Healthy"
+        );
         assert!(h.capabilities.has("routines"));
         assert!(!h.capabilities.has("sessions"));
     }

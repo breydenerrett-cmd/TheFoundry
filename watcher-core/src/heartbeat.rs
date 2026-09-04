@@ -73,7 +73,8 @@ impl Observer for HeartbeatObserver {
             // Missing file is a legitimate, common state (not yet
             // instrumented, or nothing has run yet) — degrade quietly,
             // don't treat as a crash.
-            self.health.record_failure("`.foundry/events.jsonl` not present or unreadable");
+            self.health
+                .record_failure("`.foundry/events.jsonl` not present or unreadable");
             return events;
         };
 
@@ -100,7 +101,10 @@ impl Observer for HeartbeatObserver {
                 "escalate" => "ESCALATE",
                 _ => "unknown-status",
             };
-            let mut label = format!("[{}] {} {} — {}", self.label, component, rec.event, status_note);
+            let mut label = format!(
+                "[{}] {} {} — {}",
+                self.label, component, rec.event, status_note
+            );
             if let Some(a) = &rec.artifact {
                 label.push_str(&format!(" ({a})"));
             }
@@ -109,26 +113,39 @@ impl Observer for HeartbeatObserver {
             }
             let label = crate::redact::redact_field(&label);
 
-            let ts = DateTime::parse_from_rfc3339(&rec.ts).ok().map(|d| d.with_timezone(&Utc));
+            let ts = DateTime::parse_from_rfc3339(&rec.ts)
+                .ok()
+                .map(|d| d.with_timezone(&Utc));
 
             // Reuses the Check-record path (§1a EQUIPMENT, no reasoning loop)
             // that GitObserver already established via WorktreeChanged.
-            let repo_hint = self.path.parent().and_then(|p| p.parent()).map(|p| p.display().to_string());
-            let mut entity = EntityRef::new(EntityType::Check, format!("{}/{}", self.label, component));
+            let repo_hint = self
+                .path
+                .parent()
+                .and_then(|p| p.parent())
+                .map(|p| p.display().to_string());
+            let mut entity =
+                EntityRef::new(EntityType::Check, format!("{}/{}", self.label, component));
             if let Some(hint) = repo_hint {
                 entity = entity.with_parent(hint);
             }
-            let mut ev = crate::local::empty_event(now, self.name(), EventKind::WorktreeChanged, entity);
+            let mut ev =
+                crate::local::empty_event(now, self.name(), EventKind::WorktreeChanged, entity);
             ev.label = Some(label);
             ev.fidelity = Fidelity::Observed;
-            ev.metrics = Metrics { elapsed_ms: ts.map(|t| (now - t).num_milliseconds().max(0)), ..Default::default() };
+            ev.metrics = Metrics {
+                elapsed_ms: ts.map(|t| (now - t).num_milliseconds().max(0)),
+                ..Default::default()
+            };
             events.push(ev);
         }
 
         if parsed_any || contents.trim().is_empty() {
-            self.health.record_success(now, CapabilitySet::from_iter([CAP_HEARTBEAT]));
+            self.health
+                .record_success(now, CapabilitySet::from_iter([CAP_HEARTBEAT]));
         } else {
-            self.health.record_failure("`.foundry/events.jsonl` exists but no line parsed");
+            self.health
+                .record_failure("`.foundry/events.jsonl` exists but no line parsed");
         }
         events
     }

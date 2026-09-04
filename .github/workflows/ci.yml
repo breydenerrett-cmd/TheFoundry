@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: watcher-core (fmt · clippy · test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: watcher-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: watcher-core
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: test
+        run: cargo test --all-targets
+      - name: smoke (no-remote, must not claim live remote)
+        run: |
+          out=$(cargo run -q -- --no-remote --git-dir "$GITHUB_WORKSPACE" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+          echo "$out" | head -8
+          echo "$out" | grep -q "REMOTE ESTATE: not running" || { echo "smoke: expected honest no-remote banner"; exit 1; }
+          if echo "$out" | grep -q "REMOTE ESTATE: live"; then echo "smoke: falsely claimed live remote"; exit 1; fi

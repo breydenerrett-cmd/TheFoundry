@@ -43,7 +43,8 @@ fn secret_patterns() -> &'static SecretPatterns {
             // Absolute home paths (Linux/macOS) — not a secret per se, but
             // leaks machine layout; /Users/ added (macOS) alongside /root,
             // /home/ (finding #6 false negative — this was Linux-only).
-            Regex::new(r"/(root|home/[A-Za-z0-9_\-]+|Users/[A-Za-z0-9_\-]+)(/[A-Za-z0-9_\-./]+)*").unwrap(),
+            Regex::new(r"/(root|home/[A-Za-z0-9_\-]+|Users/[A-Za-z0-9_\-]+)(/[A-Za-z0-9_\-./]+)*")
+                .unwrap(),
             // Windows paths — this is explicitly a Windows-first product
             // (§14), and Windows paths were entirely unhandled (finding #6).
             Regex::new(r"[A-Za-z]:\\[^\s\x22\x27]+").unwrap(),
@@ -122,32 +123,47 @@ mod tests {
     fn session_ids_survive_the_catch_all_unredacted() {
         let input = "station session_018UzdnsXzQ7ZvGf5SehHwH8 is WORKING";
         let out = scrub_secrets(input);
-        assert!(out.contains("session_018UzdnsXzQ7ZvGf5SehHwH8"), "known-safe entity ids must not be redacted: {out}");
+        assert!(
+            out.contains("session_018UzdnsXzQ7ZvGf5SehHwH8"),
+            "known-safe entity ids must not be redacted: {out}"
+        );
     }
 
     #[test]
     fn hyphenated_technical_phrase_without_digits_survives() {
         let input = "Refactoring the parallel-test-runner-orchestration module";
         let out = scrub_secrets(input);
-        assert_eq!(out, input, "an ordinary hyphenated phrase with no digits must not be flagged as a secret");
+        assert_eq!(
+            out, input,
+            "an ordinary hyphenated phrase with no digits must not be flagged as a secret"
+        );
     }
 
     #[test]
     fn catches_windows_paths() {
         let out = scrub_secrets(r"config at C:\Users\Brey\AppData\Local\foundry\config.toml");
-        assert!(!out.contains(r"C:\Users\Brey"), "Windows paths must be redacted on this Windows-first product: {out}");
+        assert!(
+            !out.contains(r"C:\Users\Brey"),
+            "Windows paths must be redacted on this Windows-first product: {out}"
+        );
     }
 
     #[test]
     fn catches_macos_home_paths() {
         let out = scrub_secrets("token in /Users/brey/.foundry/secret.key");
-        assert!(!out.contains("/Users/brey"), "macOS home paths must be redacted: {out}");
+        assert!(
+            !out.contains("/Users/brey"),
+            "macOS home paths must be redacted: {out}"
+        );
     }
 
     #[test]
     fn catches_aws_style_secret_key_shape() {
         let out = scrub_secrets("aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
-        assert!(!out.contains("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"), "AWS-shaped secret keys (with +/=) must be caught: {out}");
+        assert!(
+            !out.contains("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
+            "AWS-shaped secret keys (with +/=) must be caught: {out}"
+        );
     }
 
     #[test]

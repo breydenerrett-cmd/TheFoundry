@@ -20,7 +20,12 @@ fn poll_once(feed_dir: &Path, now: DateTime<Utc>) -> (StateStore, String) {
     let events = obs.poll(now);
     let mut store = StateStore::new();
     store.apply_events(&events, now);
-    store.apply_observer_health(obs.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+    store.apply_observer_health(
+        obs.health(),
+        now,
+        Some(foundry_core::observer::CAP_SESSIONS),
+        Some(foundry_core::observer::CAP_ROUTINES),
+    );
     let text = render_floor(&store, now);
     (store, text)
 }
@@ -33,21 +38,34 @@ fn empty_feed_dir_never_renders_healthy() {
     let now = Utc::now();
     let (store, text) = poll_once(dir.path(), now);
 
-    assert!(store.sessions.is_empty(), "no sessions should be fabricated from nothing");
-    assert!(!store.pipeline_verified(now, 300), "no canary ever fired in this poll — must not be verified");
+    assert!(
+        store.sessions.is_empty(),
+        "no sessions should be fabricated from nothing"
+    );
+    assert!(
+        !store.pipeline_verified(now, 300),
+        "no canary ever fired in this poll — must not be verified"
+    );
     assert_ne!(
         store.observer_health["remote_claude"].status,
         foundry_core::health::ObserverStatus::Healthy,
         "a totally empty feed dir must not read as a healthy observer"
     );
-    assert!(!text.to_lowercase().contains("pipeline verified"), "must not claim verified with zero data");
+    assert!(
+        !text.to_lowercase().contains("pipeline verified"),
+        "must not claim verified with zero data"
+    );
 }
 
 /// 2. Corrupted JSONL/JSON mid-line: the file exists but is truncated/broken.
 #[test]
 fn corrupted_json_degrades_instead_of_crashing_or_faking_data() {
     let dir = tempfile::tempdir().unwrap();
-    write(dir.path(), "list_sessions.json", "{\"data\": [ { \"id\": \"session_x\", TRUNCATED GARBAGE");
+    write(
+        dir.path(),
+        "list_sessions.json",
+        "{\"data\": [ { \"id\": \"session_x\", TRUNCATED GARBAGE",
+    );
     let now = Utc::now();
     let (store, _text) = poll_once(dir.path(), now);
 
@@ -82,9 +100,18 @@ fn unknown_status_bucket_becomes_stale_unknown_not_silently_healthy() {
     let (store, text) = poll_once(dir.path(), now);
 
     let rec = &store.sessions["session_weird"];
-    assert_eq!(rec.displayed_state.value, foundry_core::schema::StationState::StaleUnknown);
-    assert_eq!(rec.displayed_state.fidelity, foundry_core::schema::Fidelity::Unknown);
-    assert!(!text.contains("[        WORKING]"), "an unknown state must never render as WORKING");
+    assert_eq!(
+        rec.displayed_state.value,
+        foundry_core::schema::StationState::StaleUnknown
+    );
+    assert_eq!(
+        rec.displayed_state.fidelity,
+        foundry_core::schema::Fidelity::Unknown
+    );
+    assert!(
+        !text.contains("[        WORKING]"),
+        "an unknown state must never render as WORKING"
+    );
 }
 
 /// 4. "Freeze the clock": a session the API still reports as WORKING, but
@@ -110,8 +137,14 @@ fn frozen_clock_working_session_renders_hung_not_still_fresh() {
     let (store, text) = poll_once(dir.path(), now);
 
     let rec = &store.sessions["session_frozen"];
-    assert_eq!(rec.displayed_state.value, foundry_core::schema::StationState::Hung);
-    assert_eq!(rec.displayed_state.fidelity, foundry_core::schema::Fidelity::Inferred);
+    assert_eq!(
+        rec.displayed_state.value,
+        foundry_core::schema::StationState::Hung
+    );
+    assert_eq!(
+        rec.displayed_state.fidelity,
+        foundry_core::schema::Fidelity::Inferred
+    );
     assert!(text.contains("HUNG"));
 }
 
@@ -123,6 +156,7 @@ fn genuinely_empty_session_list_is_not_confused_with_a_dead_feed() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "list_sessions.json", r#"{"data": []}"#);
     let now = Utc::now();
+    write(dir.path(), "captured_at", &now.to_rfc3339());
     let (store, text) = poll_once(dir.path(), now);
 
     assert!(store.sessions.is_empty());
@@ -159,8 +193,14 @@ fn unreachable_bridge_machine_is_stale_not_idle() {
     let (store, _text) = poll_once(dir.path(), now);
 
     let rec = &store.sessions["session_dark"];
-    assert_eq!(rec.displayed_state.value, foundry_core::schema::StationState::StaleUnknown);
-    assert_ne!(rec.displayed_state.value, foundry_core::schema::StationState::Idle);
+    assert_eq!(
+        rec.displayed_state.value,
+        foundry_core::schema::StationState::StaleUnknown
+    );
+    assert_ne!(
+        rec.displayed_state.value,
+        foundry_core::schema::StationState::Idle
+    );
 }
 
 /// 7. Observer going Down mid-run must degrade PREVIOUSLY healthy sessions —
@@ -189,18 +229,37 @@ fn observer_down_after_a_healthy_poll_degrades_existing_sessions() {
 
     let events1 = obs.poll(now);
     store.apply_events(&events1, now);
-    store.apply_observer_health(obs.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
-    assert_eq!(store.sessions["session_ok_then_blind"].displayed_state.value, foundry_core::schema::StationState::Working);
+    store.apply_observer_health(
+        obs.health(),
+        now,
+        Some(foundry_core::observer::CAP_SESSIONS),
+        Some(foundry_core::observer::CAP_ROUTINES),
+    );
+    assert_eq!(
+        store.sessions["session_ok_then_blind"]
+            .displayed_state
+            .value,
+        foundry_core::schema::StationState::Working
+    );
 
     // Now the feed goes dark (file removed — network severed).
     fs::remove_file(dir.path().join("list_sessions.json")).unwrap();
     let later = now + Duration::seconds(10);
     let events2 = obs.poll(later);
     store.apply_events(&events2, later);
-    store.apply_observer_health(obs.health(), later, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+    store.apply_observer_health(
+        obs.health(),
+        later,
+        Some(foundry_core::observer::CAP_SESSIONS),
+        Some(foundry_core::observer::CAP_ROUTINES),
+    );
 
     let rec = &store.sessions["session_ok_then_blind"];
-    assert_eq!(rec.displayed_state.value, foundry_core::schema::StationState::StaleUnknown, "must not still read Working once the observer is Down");
+    assert_eq!(
+        rec.displayed_state.value,
+        foundry_core::schema::StationState::StaleUnknown,
+        "must not still read Working once the observer is Down"
+    );
 }
 
 /// 8. The pipeline-verified canary must actually gate the top-level claim —
@@ -226,7 +285,10 @@ fn healthy_looking_snapshot_without_canary_is_still_unverified() {
     let (store, text) = poll_once(dir.path(), now); // no SyntheticCanary polled here on purpose
 
     assert!(!store.pipeline_verified(now, 300));
-    assert!(text.contains("UNVERIFIED"), "a plausible-looking snapshot must not read as verified without the canary");
+    assert!(
+        text.contains("UNVERIFIED"),
+        "a plausible-looking snapshot must not read as verified without the canary"
+    );
 }
 
 // --- adversarial review findings (Opus-tier review, applied to the full pipeline) ---
@@ -249,15 +311,29 @@ fn dead_remote_observer_is_unverified_even_with_a_live_canary() {
         let mut events = remote.poll(t);
         events.extend(canary.poll(t));
         store.apply_events(&events, t);
-        store.apply_observer_health(remote.health(), t, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+        store.apply_observer_health(
+            remote.health(),
+            t,
+            Some(foundry_core::observer::CAP_SESSIONS),
+            Some(foundry_core::observer::CAP_ROUTINES),
+        );
         store.apply_observer_health(canary.health(), t, None, None);
     }
-    assert_eq!(remote.health().status, foundry_core::health::ObserverStatus::Down);
+    assert_eq!(
+        remote.health().status,
+        foundry_core::health::ObserverStatus::Down
+    );
 
     let final_now = now + Duration::seconds(3);
     let text = render_floor(&store, final_now);
-    assert!(!store.pipeline_verified(final_now, 300), "must not be verified while remote_claude is Down");
-    assert!(text.contains("UNVERIFIED"), "banner must say UNVERIFIED, not LIVE: {text}");
+    assert!(
+        !store.pipeline_verified(final_now, 300),
+        "must not be verified while remote_claude is Down"
+    );
+    assert!(
+        text.contains("UNVERIFIED"),
+        "banner must say UNVERIFIED, not LIVE: {text}"
+    );
     assert!(!text.contains("LIVE (pipeline verified)"));
 }
 
@@ -286,8 +362,16 @@ fn partial_capability_loss_degrades_only_the_lost_capability() {
     let mut store = StateStore::new();
     let events1 = remote.poll(now);
     store.apply_events(&events1, now);
-    store.apply_observer_health(remote.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
-    assert_eq!(store.sessions["session_partial"].displayed_state.value, foundry_core::schema::StationState::Working);
+    store.apply_observer_health(
+        remote.health(),
+        now,
+        Some(foundry_core::observer::CAP_SESSIONS),
+        Some(foundry_core::observer::CAP_ROUTINES),
+    );
+    assert_eq!(
+        store.sessions["session_partial"].displayed_state.value,
+        foundry_core::schema::StationState::Working
+    );
     assert!(!store.routines["trig_partial"].stale);
 
     // Sessions capability vanishes; routines capability still fine.
@@ -295,7 +379,12 @@ fn partial_capability_loss_degrades_only_the_lost_capability() {
     let later = now + Duration::seconds(10);
     let events2 = remote.poll(later);
     store.apply_events(&events2, later);
-    store.apply_observer_health(remote.health(), later, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+    store.apply_observer_health(
+        remote.health(),
+        later,
+        Some(foundry_core::observer::CAP_SESSIONS),
+        Some(foundry_core::observer::CAP_ROUTINES),
+    );
 
     assert_eq!(
         store.sessions["session_partial"].displayed_state.value,
@@ -335,9 +424,13 @@ fn one_malformed_session_record_does_not_nuke_the_whole_batch() {
         }
     ]});
     write(dir.path(), "list_sessions.json", &body.to_string());
+    write(dir.path(), "captured_at", &now.to_rfc3339());
     let (store, text) = poll_once(dir.path(), now);
 
-    assert!(store.sessions.contains_key("session_good"), "the one good record in the batch must still come through: {text}");
+    assert!(
+        store.sessions.contains_key("session_good"),
+        "the one good record in the batch must still come through: {text}"
+    );
     assert_eq!(
         store.observer_health["remote_claude"].status,
         foundry_core::health::ObserverStatus::Healthy,
@@ -362,7 +455,12 @@ fn routines_go_stale_when_routines_capability_is_lost() {
     let mut store = StateStore::new();
     let events1 = remote.poll(now);
     store.apply_events(&events1, now);
-    store.apply_observer_health(remote.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+    store.apply_observer_health(
+        remote.health(),
+        now,
+        Some(foundry_core::observer::CAP_SESSIONS),
+        Some(foundry_core::observer::CAP_ROUTINES),
+    );
     assert!(store.routines["trig_x"].overdue);
     assert!(!store.routines["trig_x"].stale);
     let text1 = render_floor(&store, now);
@@ -372,9 +470,17 @@ fn routines_go_stale_when_routines_capability_is_lost() {
     let later = now + Duration::hours(2);
     let events2 = remote.poll(later);
     store.apply_events(&events2, later);
-    store.apply_observer_health(remote.health(), later, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+    store.apply_observer_health(
+        remote.health(),
+        later,
+        Some(foundry_core::observer::CAP_SESSIONS),
+        Some(foundry_core::observer::CAP_ROUTINES),
+    );
 
-    assert!(store.routines["trig_x"].stale, "routine must be marked stale once its capability is lost");
+    assert!(
+        store.routines["trig_x"].stale,
+        "routine must be marked stale once its capability is lost"
+    );
     let text2 = render_floor(&store, later);
     assert!(text2.contains("[STALE]"), "a stale routine must render distinctly, not still confidently OVERDUE/ON SCHEDULE: {text2}");
 }
@@ -395,9 +501,18 @@ fn unknown_enabled_routine_does_not_render_as_confidently_active() {
     let (store, text) = poll_once(dir.path(), now);
 
     let rec = &store.routines["trig_unknown_enabled"];
-    assert!(!rec.enabled, "unknown enabled-state must default to NOT confidently active");
-    assert!(!rec.overdue, "must not claim OVERDUE (implies active+stuck) when we don't even know if it's enabled");
-    assert!(!text.contains("[ON SCHEDULE]"), "must not render a confident green verdict for an unknown enabled-state: {text}");
+    assert!(
+        !rec.enabled,
+        "unknown enabled-state must default to NOT confidently active"
+    );
+    assert!(
+        !rec.overdue,
+        "must not claim OVERDUE (implies active+stuck) when we don't even know if it's enabled"
+    );
+    assert!(
+        !text.contains("[ON SCHEDULE]"),
+        "must not render a confident green verdict for an unknown enabled-state: {text}"
+    );
 }
 
 /// Finding #5: a session that vanishes from the snapshot must get a 60s
@@ -421,7 +536,12 @@ fn vanished_session_fades_then_folds_with_a_trace_not_silently() {
     let mut store = StateStore::new();
     let events1 = remote.poll(now);
     store.apply_events(&events1, now);
-    store.apply_observer_health(remote.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+    store.apply_observer_health(
+        remote.health(),
+        now,
+        Some(foundry_core::observer::CAP_SESSIONS),
+        Some(foundry_core::observer::CAP_ROUTINES),
+    );
     assert!(store.sessions.contains_key("session_will_vanish"));
 
     // The session vanishes from the next snapshot entirely.
@@ -429,7 +549,12 @@ fn vanished_session_fades_then_folds_with_a_trace_not_silently() {
     let just_after = now + Duration::seconds(5);
     let events2 = remote.poll(just_after);
     store.apply_events(&events2, just_after);
-    store.apply_observer_health(remote.health(), just_after, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+    store.apply_observer_health(
+        remote.health(),
+        just_after,
+        Some(foundry_core::observer::CAP_SESSIONS),
+        Some(foundry_core::observer::CAP_ROUTINES),
+    );
 
     assert!(store.sessions["session_will_vanish"].gone);
     let text_fading = render_floor(&store, just_after);
@@ -474,10 +599,22 @@ fn secrets_in_raw_session_text_are_redacted_end_to_end() {
 
     let rec = &store.sessions["session_leaky"];
     let label = rec.label.as_ref().map(|f| f.value.as_str()).unwrap_or("");
-    assert!(!label.contains("sk-abcdefghij1234567890"), "API key must be redacted from the stored label: {label}");
-    assert!(!label.contains("/home/user/secretproj"), "absolute path must be redacted: {label}");
-    assert!(!label.contains("brey@example.com"), "email must be redacted: {label}");
-    assert!(!text.contains("sk-abcdefghij1234567890"), "must not reach the rendered text either: {text}");
+    assert!(
+        !label.contains("sk-abcdefghij1234567890"),
+        "API key must be redacted from the stored label: {label}"
+    );
+    assert!(
+        !label.contains("/home/user/secretproj"),
+        "absolute path must be redacted: {label}"
+    );
+    assert!(
+        !label.contains("brey@example.com"),
+        "email must be redacted: {label}"
+    );
+    assert!(
+        !text.contains("sk-abcdefghij1234567890"),
+        "must not reach the rendered text either: {text}"
+    );
     assert!(!text.contains("brey@example.com"));
 }
 
@@ -504,11 +641,18 @@ fn distinct_observers_with_different_session_capability_names_dont_shadow_each_o
         entity: EntityRef::new(EntityType::Session, "session_remote"),
         project_id: None,
         session_id: Some("session_remote".into()),
-        model: None, model_current: None, model_last_served: None, effort: None,
+        model: None,
+        model_current: None,
+        model_last_served: None,
+        effort: None,
         state: Some(StationState::Working),
-        label: None, detail: None,
+        label: None,
+        detail: None,
         fidelity: Fidelity::Observed,
-        metrics: Metrics::default(), ttl_secs: None, next_run_at: None, enabled: None,
+        metrics: Metrics::default(),
+        ttl_secs: None,
+        next_run_at: None,
+        enabled: None,
     };
     let mut local_event = remote_event.clone();
     local_event.source = "local_claude".into();
@@ -519,19 +663,122 @@ fn distinct_observers_with_different_session_capability_names_dont_shadow_each_o
     store.apply_events(&[remote_event, local_event], now);
 
     let mut remote_health = ObserverHealth::new("remote_claude");
-    remote_health.record_success(now, foundry_core::health::CapabilitySet::from_iter(["sessions"]));
+    remote_health.record_success(
+        now,
+        foundry_core::health::CapabilitySet::from_iter(["sessions"]),
+    );
     let mut local_health = ObserverHealth::new("local_claude");
-    local_health.record_success(now, foundry_core::health::CapabilitySet::from_iter(["local_sessions"]));
+    local_health.record_success(
+        now,
+        foundry_core::health::CapabilitySet::from_iter(["local_sessions"]),
+    );
 
     store.apply_observer_health(&remote_health, now, Some("sessions"), Some("routines"));
     store.apply_observer_health(&local_health, now, Some("local_sessions"), None);
 
     assert_eq!(
-        store.sessions["session_remote"].displayed_state.value, StationState::Working,
+        store.sessions["session_remote"].displayed_state.value,
+        StationState::Working,
         "remote-sourced session must stay healthy — its own capability (sessions) is present"
     );
     assert_eq!(
         store.sessions["sid_local"].displayed_state.value, StationState::Working,
         "local-sourced session must ALSO stay healthy — its own capability (local_sessions) is present, even though remote_claude's capability name differs"
+    );
+}
+
+/// Truth bug: a snapshot with NO capture timestamp anywhere (no
+/// `captured_at` sidecar, no top-level `captured_at` field) must render as
+/// DEGRADED with an unknown age — never as "live", since the poll succeeding
+/// says nothing about how old the underlying data actually is.
+#[test]
+fn snapshot_without_captured_at_renders_degraded_not_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Utc::now();
+    let body = serde_json::json!({"data": [{
+        "id": "session_no_ts",
+        "status_bucket": "SESSION_STATUS_BUCKET_WORKING",
+        "updated_at": now.to_rfc3339(),
+    }]});
+    write(dir.path(), "list_sessions.json", &body.to_string());
+    // Deliberately no captured_at sidecar and no captured_at field in the JSON.
+    let (store, text) = poll_once(dir.path(), now);
+
+    assert_eq!(
+        store.observer_health["remote_claude"].status,
+        foundry_core::health::ObserverStatus::Degraded,
+        "a snapshot with no captured_at must be Degraded, not Healthy, even though it parsed fine"
+    );
+    assert!(
+        text.contains("DEGRADED"),
+        "render must show DEGRADED for an unknown-age snapshot: {text}"
+    );
+    assert!(
+        !text.contains("REMOTE ESTATE: live"),
+        "must never claim the remote estate is live with an unknown snapshot age: {text}"
+    );
+}
+
+/// Truth bug: a snapshot captured 3 hours ago (well past the 30-minute
+/// staleness threshold in render.rs) must render DEGRADED with that age
+/// shown, even though the poll that read the file just happened right now.
+#[test]
+fn old_captured_at_renders_degraded_with_age_not_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Utc::now();
+    let captured_at = now - Duration::hours(3);
+    let body = serde_json::json!({"data": [{
+        "id": "session_stale_snapshot",
+        "status_bucket": "SESSION_STATUS_BUCKET_WORKING",
+        "updated_at": now.to_rfc3339(),
+    }]});
+    write(dir.path(), "list_sessions.json", &body.to_string());
+    write(dir.path(), "captured_at", &captured_at.to_rfc3339());
+    let (store, text) = poll_once(dir.path(), now);
+
+    assert_eq!(
+        store.observer_health["remote_claude"].last_sync_age_secs(now),
+        Some(3 * 3600),
+        "reported sync age must be the SNAPSHOT age (3h), not the poll time (0s)"
+    );
+    assert!(
+        text.contains("DEGRADED"),
+        "a 3-hour-old snapshot must render DEGRADED: {text}"
+    );
+    assert!(
+        !text.contains("REMOTE ESTATE: live"),
+        "a 3-hour-old snapshot must never render as live: {text}"
+    );
+}
+
+/// A snapshot captured just 1 minute ago (well inside the 30-minute
+/// staleness threshold) must still render as live — the fix must not make
+/// every remote snapshot look stale.
+#[test]
+fn fresh_captured_at_renders_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Utc::now();
+    let captured_at = now - Duration::minutes(1);
+    let body = serde_json::json!({"data": [{
+        "id": "session_fresh_snapshot",
+        "status_bucket": "SESSION_STATUS_BUCKET_WORKING",
+        "updated_at": now.to_rfc3339(),
+    }]});
+    write(dir.path(), "list_sessions.json", &body.to_string());
+    write(dir.path(), "captured_at", &captured_at.to_rfc3339());
+    let (store, text) = poll_once(dir.path(), now);
+
+    assert_eq!(
+        store.observer_health["remote_claude"].status,
+        foundry_core::health::ObserverStatus::Healthy,
+        "a freshly captured, fully parsing snapshot should read Healthy"
+    );
+    assert!(
+        text.contains("REMOTE ESTATE: live"),
+        "a 1-minute-old snapshot must render as live: {text}"
+    );
+    assert!(
+        !text.contains("DEGRADED"),
+        "a fresh snapshot must not show DEGRADED: {text}"
     );
 }

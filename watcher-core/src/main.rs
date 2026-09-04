@@ -48,21 +48,42 @@ fn parse_args() -> Args {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--feed-dir" => feed_dir = PathBuf::from(args.next().expect("--feed-dir needs a value")),
+            "--feed-dir" => {
+                feed_dir = PathBuf::from(args.next().expect("--feed-dir needs a value"))
+            }
             "--git-dir" => git_dir = PathBuf::from(args.next().expect("--git-dir needs a value")),
-            "--heartbeat-dir" => heartbeat_dir = Some(PathBuf::from(args.next().expect("--heartbeat-dir needs a value"))),
-            "--heartbeat-label" => heartbeat_label = args.next().expect("--heartbeat-label needs a value"),
+            "--heartbeat-dir" => {
+                heartbeat_dir = Some(PathBuf::from(
+                    args.next().expect("--heartbeat-dir needs a value"),
+                ))
+            }
+            "--heartbeat-label" => {
+                heartbeat_label = args.next().expect("--heartbeat-label needs a value")
+            }
             "--log-dir" => log_dir = PathBuf::from(args.next().expect("--log-dir needs a value")),
             "--audit" => audit = true,
             "--no-remote" => no_remote = true,
             "--watch" => {
-                let secs: u64 = args.next().expect("--watch needs a value").parse().expect("--watch value must be a number of seconds");
+                let secs: u64 = args
+                    .next()
+                    .expect("--watch needs a value")
+                    .parse()
+                    .expect("--watch value must be a number of seconds");
                 watch_secs = Some(secs);
             }
             other => eprintln!("warning: unrecognized argument '{other}', ignoring"),
         }
     }
-    Args { feed_dir, git_dir, heartbeat_dir, heartbeat_label, log_dir, audit, watch_secs, no_remote }
+    Args {
+        feed_dir,
+        git_dir,
+        heartbeat_dir,
+        heartbeat_label,
+        log_dir,
+        audit,
+        watch_secs,
+        no_remote,
+    }
 }
 
 fn main() {
@@ -71,10 +92,14 @@ fn main() {
     let mut remote = (!args.no_remote).then(|| RemoteClaudeObserver::new(&args.feed_dir));
     let mut local_claude = LocalClaudeObserver::new();
     let mut git = GitObserver::new(&args.git_dir);
-    let mut heartbeat = args.heartbeat_dir.as_ref().map(|d| HeartbeatObserver::new(d, args.heartbeat_label.clone()));
+    let mut heartbeat = args
+        .heartbeat_dir
+        .as_ref()
+        .map(|d| HeartbeatObserver::new(d, args.heartbeat_label.clone()));
     let mut canary = SyntheticCanary::new();
     let mut store = StateStore::new();
-    let mut log = EventLog::new(&args.log_dir, 50_000, 30).expect("failed to open event log directory");
+    let mut log =
+        EventLog::new(&args.log_dir, 50_000, 30).expect("failed to open event log directory");
 
     loop {
         let now = Utc::now();
@@ -92,9 +117,19 @@ fn main() {
 
         store.apply_events(&all_events, now);
         if let Some(remote) = &remote {
-            store.apply_observer_health(remote.health(), now, Some(foundry_core::observer::CAP_SESSIONS), Some(foundry_core::observer::CAP_ROUTINES));
+            store.apply_observer_health(
+                remote.health(),
+                now,
+                Some(foundry_core::observer::CAP_SESSIONS),
+                Some(foundry_core::observer::CAP_ROUTINES),
+            );
         }
-        store.apply_observer_health(local_claude.health(), now, Some(foundry_core::local::CAP_LOCAL_SESSIONS), None);
+        store.apply_observer_health(
+            local_claude.health(),
+            now,
+            Some(foundry_core::local::CAP_LOCAL_SESSIONS),
+            None,
+        );
         store.apply_observer_health(git.health(), now, None, None);
         if let Some(hb) = &heartbeat {
             store.apply_observer_health(hb.health(), now, None, None);

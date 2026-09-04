@@ -102,7 +102,10 @@ impl Observer for LocalClaudeObserver {
 
     fn poll(&mut self, now: DateTime<Utc>) -> Vec<Event> {
         let mut events = Vec::new();
-        let output = Command::new(&self.claude_bin).arg("agents").arg("--json").output();
+        let output = Command::new(&self.claude_bin)
+            .arg("agents")
+            .arg("--json")
+            .output();
 
         let entries: Option<Vec<LocalAgentEntry>> = match output {
             Ok(out) if out.status.success() => serde_json::from_slice(&out.stdout).ok(),
@@ -116,9 +119,20 @@ impl Observer for LocalClaudeObserver {
                     seen.insert(e.session_id.clone());
                     self.known_ids.insert(e.session_id.clone());
 
-                    let raw_label = format!("{} [{}] {}", e.name.clone().unwrap_or_default(), e.kind, e.cwd);
+                    let raw_label = format!(
+                        "{} [{}] {}",
+                        e.name.clone().unwrap_or_default(),
+                        e.kind,
+                        e.cwd
+                    );
 
-                    let mut ev = empty_event(now, self.name(), EventKind::SessionObserved, EntityRef::new(EntityType::Session, e.session_id.clone()).with_parent(e.cwd.clone()));
+                    let mut ev = empty_event(
+                        now,
+                        self.name(),
+                        EventKind::SessionObserved,
+                        EntityRef::new(EntityType::Session, e.session_id.clone())
+                            .with_parent(e.cwd.clone()),
+                    );
                     ev.session_id = Some(e.session_id.clone());
                     // Honest limitation: `claude agents --json` proves the process
                     // is ALIVE, not what it's doing. We render that as Working
@@ -139,25 +153,43 @@ impl Observer for LocalClaudeObserver {
                     // presence in this list, not a real activity timestamp.
                     // Background sessions report a real status/state — use it
                     // when present (Observed) instead of assuming (Inferred).
-                    let has_confirmed_activity = e.status.as_deref() == Some("busy") || e.state.as_deref() == Some("working");
+                    let has_confirmed_activity = e.status.as_deref() == Some("busy")
+                        || e.state.as_deref() == Some("working");
                     ev.state = Some(StationState::Working);
-                    ev.fidelity = if has_confirmed_activity { Fidelity::Observed } else { Fidelity::Inferred };
+                    ev.fidelity = if has_confirmed_activity {
+                        Fidelity::Observed
+                    } else {
+                        Fidelity::Inferred
+                    };
                     ev.label = Some(crate::redact::redact_field(&raw_label));
                     ev.detail = Some("local".to_string());
                     ev.metrics = Metrics::default();
                     ev.ttl_secs = Some(60);
                     events.push(ev);
                 }
-                for old_id in self.known_ids.difference(&seen).cloned().collect::<Vec<_>>() {
+                for old_id in self
+                    .known_ids
+                    .difference(&seen)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                {
                     self.known_ids.remove(&old_id);
-                    let mut gone = empty_event(now, self.name(), EventKind::SessionGone, EntityRef::new(EntityType::Session, old_id.clone()));
+                    let mut gone = empty_event(
+                        now,
+                        self.name(),
+                        EventKind::SessionGone,
+                        EntityRef::new(EntityType::Session, old_id.clone()),
+                    );
                     gone.session_id = Some(old_id);
                     events.push(gone);
                 }
-                self.health.record_success(now, CapabilitySet::from_iter([CAP_LOCAL_SESSIONS]));
+                self.health
+                    .record_success(now, CapabilitySet::from_iter([CAP_LOCAL_SESSIONS]));
             }
             None => {
-                self.health.record_failure("`claude agents --json` failed, was missing, or returned unparseable output");
+                self.health.record_failure(
+                    "`claude agents --json` failed, was missing, or returned unparseable output",
+                );
             }
         }
 
@@ -179,7 +211,10 @@ pub struct GitObserver {
 
 impl GitObserver {
     pub fn new(repo_path: impl Into<PathBuf>) -> Self {
-        Self { repo_path: repo_path.into(), health: ObserverHealth::new("git") }
+        Self {
+            repo_path: repo_path.into(),
+            health: ObserverHealth::new("git"),
+        }
     }
 
     fn run(&self, args: &[&str]) -> Option<String> {
@@ -209,18 +244,28 @@ impl Observer for GitObserver {
         match (&branch, &status) {
             (Some(branch), Some(status)) => {
                 let dirty = !status.is_empty();
-                let last_commit = self.run(&["log", "-1", "--format=%h %cI %s"]).unwrap_or_else(|| "(no commits)".into());
+                let last_commit = self
+                    .run(&["log", "-1", "--format=%h %cI %s"])
+                    .unwrap_or_else(|| "(no commits)".into());
                 let repo_id = self.repo_path.display().to_string();
                 let label = format!("branch={branch} dirty={dirty} last_commit=\"{last_commit}\"");
 
-                let mut ev = empty_event(now, self.name(), EventKind::WorktreeChanged, EntityRef::new(EntityType::Check, repo_id.clone()).with_parent(repo_id));
+                let mut ev = empty_event(
+                    now,
+                    self.name(),
+                    EventKind::WorktreeChanged,
+                    EntityRef::new(EntityType::Check, repo_id.clone()).with_parent(repo_id),
+                );
                 ev.label = Some(crate::redact::redact_field(&label));
                 ev.fidelity = Fidelity::Observed;
                 events.push(ev);
-                self.health.record_success(now, CapabilitySet::from_iter([CAP_GIT]));
+                self.health
+                    .record_success(now, CapabilitySet::from_iter([CAP_GIT]));
             }
             _ => {
-                self.health.record_failure("git status/rev-parse failed — not a git repo, or git unavailable");
+                self.health.record_failure(
+                    "git status/rev-parse failed — not a git repo, or git unavailable",
+                );
             }
         }
 

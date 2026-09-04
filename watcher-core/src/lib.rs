@@ -1,10 +1,10 @@
-pub mod schema;
-pub mod redact;
-pub mod health;
-pub mod local;
-pub mod heartbeat;
 pub mod bay;
-pub mod observer;
-pub mod reducer;
 pub mod eventlog;
+pub mod health;
+pub mod heartbeat;
+pub mod local;
+pub mod observer;
+pub mod redact;
+pub mod reducer;
 pub mod render;
+pub mod schema;

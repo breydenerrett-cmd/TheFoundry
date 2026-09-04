@@ -20,7 +20,7 @@
 //! without baking that undecided mechanism into the rest of the crate.
 
 use crate::health::{CapabilitySet, ObserverHealth};
-use crate::schema::{Event, EventKind, EntityRef, EntityType, Fidelity, Metrics, StationState};
+use crate::schema::{EntityRef, EntityType, Event, EventKind, Fidelity, Metrics, StationState};
 use chrono::{DateTime, Utc};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,12 +42,10 @@ pub trait Observer {
 mod remote_claude_raw {
     use serde::Deserialize;
 
-    #[derive(Debug, Deserialize, Default)]
-    pub struct SessionsSnapshot {
-        #[serde(default)]
-        pub data: Vec<RawSession>,
-    }
-
+    /// Fields kept here document the observed raw surface even though this
+    /// adapter does not read all of them past `normalize()` — see the module
+    /// doc's CRITICAL RULE. Not dead code to delete; dead code to silence.
+    #[allow(dead_code)]
     #[derive(Debug, Deserialize, Default)]
     pub struct RawSession {
         pub id: String,
@@ -101,6 +99,7 @@ mod remote_claude_raw {
         pub needs_action: Option<String>,
     }
 
+    #[allow(dead_code)]
     #[derive(Debug, Deserialize, Default)]
     pub struct RawInitError {
         #[serde(default)]
@@ -109,12 +108,7 @@ mod remote_claude_raw {
         pub recoverable: Option<bool>,
     }
 
-    #[derive(Debug, Deserialize, Default)]
-    pub struct TriggersSnapshot {
-        #[serde(default)]
-        pub data: Vec<RawTrigger>,
-    }
-
+    #[allow(dead_code)]
     #[derive(Debug, Deserialize, Default)]
     pub struct RawTrigger {
         pub id: String,
@@ -164,12 +158,6 @@ impl RemoteClaudeObserver {
         }
     }
 
-    fn read_json<T: serde::de::DeserializeOwned + Default>(&self, filename: &str) -> Option<T> {
-        let path = self.feed_dir.join(filename);
-        let bytes = fs::read(&path).ok()?;
-        serde_json::from_slice(&bytes).ok()
-    }
-
     /// Reads a `{"data": [...]}` snapshot and parses each element of `data`
     /// INDEPENDENTLY, so one malformed record can't lose the whole batch.
     /// (Adversarial finding #3: a strict whole-file deserialize meant a
@@ -179,7 +167,10 @@ impl RemoteClaudeObserver {
     /// if the file itself is unreadable or isn't even valid JSON with a
     /// `data` array — that case is still a real capability loss, handled by
     /// the caller exactly like today's total-failure path.
-    fn read_records<T: serde::de::DeserializeOwned>(&self, filename: &str) -> Option<(Vec<T>, usize)> {
+    fn read_records<T: serde::de::DeserializeOwned>(
+        &self,
+        filename: &str,
+    ) -> Option<(Vec<T>, usize)> {
         let path = self.feed_dir.join(filename);
         let bytes = fs::read(&path).ok()?;
         let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
@@ -213,14 +204,62 @@ impl RemoteClaudeObserver {
             Some("SESSION_STATUS_BUCKET_WORKING") => (StationState::Working, Fidelity::Observed),
             Some("SESSION_STATUS_BUCKET_BLOCKED") => (StationState::Blocked, Fidelity::Observed),
             Some("SESSION_STATUS_BUCKET_REVIEW_READY") => (StationState::Idle, Fidelity::Observed),
-            Some("SESSION_STATUS_BUCKET_COMPLETED") => (StationState::Completed, Fidelity::Observed),
+            Some("SESSION_STATUS_BUCKET_COMPLETED") => {
+                (StationState::Completed, Fidelity::Observed)
+            }
             Some(_other) => (StationState::StaleUnknown, Fidelity::Unknown),
             None => (StationState::StaleUnknown, Fidelity::Unknown),
         }
     }
 
     fn parse_ts(s: &Option<String>) -> Option<DateTime<Utc>> {
-        s.as_ref().and_then(|v| DateTime::parse_from_rfc3339(v).ok()).map(|d| d.with_timezone(&Utc))
+        s.as_ref()
+            .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
+            .map(|d| d.with_timezone(&Utc))
+    }
+
+    /// Clock-skew tolerance shared by every "is this timestamp plausible"
+    /// check in this observer (§16): a claimed time implausibly far in the
+    /// future is treated as an unparseable/unknown timestamp, not as real
+    /// freshness.
+    const CLOCK_SKEW_TOLERANCE_SECS: i64 = 120;
+
+    /// Determines when the snapshot in `feed_dir` was actually CAPTURED, as
+    /// opposed to when this poll happened to read it off disk. Truth bug fix:
+    /// without this, a snapshot from days ago reads as "live" purely because
+    /// reading the file succeeded just now.
+    ///
+    /// Looked up, in order:
+    ///   1. sidecar file `<feed_dir>/captured_at` — a single RFC3339 line;
+    ///   2. a top-level `"captured_at"` string field in `list_sessions.json`;
+    ///   3. the same field in `list_triggers.json`.
+    ///
+    /// Returns `None` (deliberately unknown) if none of those parse, or if
+    /// the parsed time is implausibly far in the future (clock skew).
+    fn read_captured_at(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        let from_sidecar = fs::read_to_string(self.feed_dir.join("captured_at"))
+            .ok()
+            .and_then(|s| DateTime::parse_from_rfc3339(s.trim()).ok())
+            .map(|d| d.with_timezone(&Utc));
+
+        let from_json = |filename: &str| -> Option<DateTime<Utc>> {
+            let bytes = fs::read(self.feed_dir.join(filename)).ok()?;
+            let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+            let raw = value.get("captured_at")?.as_str()?;
+            DateTime::parse_from_rfc3339(raw)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        };
+
+        let captured_at = from_sidecar
+            .or_else(|| from_json("list_sessions.json"))
+            .or_else(|| from_json("list_triggers.json"))?;
+
+        if (captured_at - now).num_seconds() > Self::CLOCK_SKEW_TOLERANCE_SECS {
+            None // implausibly far in the future — skewed clock, not real freshness
+        } else {
+            Some(captured_at)
+        }
     }
 }
 
@@ -233,7 +272,9 @@ impl Observer for RemoteClaudeObserver {
         let mut events = Vec::new();
         let mut caps = CapabilitySet::new();
 
-        if let Some((records, failed)) = self.read_records::<remote_claude_raw::RawSession>("list_sessions.json") {
+        if let Some((records, failed)) =
+            self.read_records::<remote_claude_raw::RawSession>("list_sessions.json")
+        {
             caps.0.insert(CAP_SESSIONS.to_string());
             if failed > 0 {
                 eprintln!("warning: remote_claude observer: {failed} session record(s) in list_sessions.json failed to parse and were skipped (batch not lost)");
@@ -276,19 +317,28 @@ impl Observer for RemoteClaudeObserver {
                     session_id: Some(raw.id.clone()),
                     model: raw.configured_model.clone(),
                     model_current: raw.session_context.as_ref().and_then(|c| c.model.clone()),
-                    model_last_served: raw.external_metadata.as_ref().and_then(|m| m.last_served_model.clone()),
+                    model_last_served: raw
+                        .external_metadata
+                        .as_ref()
+                        .and_then(|m| m.last_served_model.clone()),
                     effort: None,
                     state: Some(state),
                     // §15: redact BEFORE this leaves the observer boundary —
                     // titles/status text are free-form and can contain paths,
                     // emails, or accidentally-pasted secrets (adversarial
                     // finding #6: this was previously never called at all).
-                    label: raw.post_turn_summary.as_ref().and_then(|p| p.status_detail.clone())
+                    label: raw
+                        .post_turn_summary
+                        .as_ref()
+                        .and_then(|p| p.status_detail.clone())
                         .or_else(|| raw.title.clone())
                         .map(|s| crate::redact::redact_field(&s)),
                     detail: raw.environment_kind.clone(),
                     fidelity,
-                    metrics: Metrics { elapsed_ms, ..Default::default() },
+                    metrics: Metrics {
+                        elapsed_ms,
+                        ..Default::default()
+                    },
                     ttl_secs: Some(120),
                     next_run_at: None,
                     enabled: None,
@@ -299,7 +349,11 @@ impl Observer for RemoteClaudeObserver {
             // re-fires identically on every future poll forever, an unbounded
             // and misleading (repeated "just went gone") event stream (§16 log
             // growth must be bounded by construction).
-            let now_gone: Vec<String> = self.known_session_ids.difference(&seen_this_poll).cloned().collect();
+            let now_gone: Vec<String> = self
+                .known_session_ids
+                .difference(&seen_this_poll)
+                .cloned()
+                .collect();
             for old_id in &now_gone {
                 self.known_session_ids.remove(old_id);
             }
@@ -327,7 +381,9 @@ impl Observer for RemoteClaudeObserver {
             }
         }
 
-        if let Some((records, failed)) = self.read_records::<remote_claude_raw::RawTrigger>("list_triggers.json") {
+        if let Some((records, failed)) =
+            self.read_records::<remote_claude_raw::RawTrigger>("list_triggers.json")
+        {
             caps.0.insert(CAP_ROUTINES.to_string());
             if failed > 0 {
                 eprintln!("warning: remote_claude observer: {failed} trigger record(s) in list_triggers.json failed to parse and were skipped (batch not lost)");
@@ -337,7 +393,9 @@ impl Observer for RemoteClaudeObserver {
                 // A disabled (or unknown-enabled — §16 says unknown != enabled)
                 // routine is never "overdue" — it's off or unconfirmed, not stuck.
                 let is_overdue = raw.enabled.unwrap_or(false)
-                    && next_run.map(|nr| now > nr + chrono::Duration::minutes(5)).unwrap_or(false);
+                    && next_run
+                        .map(|nr| now > nr + chrono::Duration::minutes(5))
+                        .unwrap_or(false);
                 if let Some(nr) = next_run {
                     self.known_trigger_next_run.insert(raw.id.clone(), nr);
                 }
@@ -345,7 +403,11 @@ impl Observer for RemoteClaudeObserver {
                 events.push(Event {
                     ts: now,
                     source: self.name().to_string(),
-                    kind: if is_overdue { EventKind::RoutineOverdue } else { EventKind::RoutineScheduled },
+                    kind: if is_overdue {
+                        EventKind::RoutineOverdue
+                    } else {
+                        EventKind::RoutineScheduled
+                    },
                     entity: EntityRef::new(EntityType::Routine, raw.id.clone()),
                     project_id: None,
                     session_id: raw.persistent_session_id.clone(),
@@ -361,7 +423,10 @@ impl Observer for RemoteClaudeObserver {
                     // defense-in-depth secret scrub runs here too, since
                     // adversarial finding #6 showed the crate's own redactor
                     // was never actually being called anywhere at all.
-                    detail: raw.prompt_redacted.as_deref().map(crate::redact::scrub_secrets),
+                    detail: raw
+                        .prompt_redacted
+                        .as_deref()
+                        .map(crate::redact::scrub_secrets),
                     // The routine's enabled/overdue facts are directly observed
                     // from the trigger snapshot — always Observed fidelity here.
                     fidelity: Fidelity::Observed,
@@ -374,9 +439,15 @@ impl Observer for RemoteClaudeObserver {
         }
 
         if caps.0.is_empty() {
-            self.health.record_failure("no readable snapshot files in feed_dir");
+            self.health
+                .record_failure("no readable snapshot files in feed_dir");
         } else {
             self.health.record_success(now, caps);
+            // Truth bug fix: freshness for this observer must be the age of
+            // the SNAPSHOT DATA, not the age of this poll — a bridge process
+            // drops these files, potentially long after they were captured.
+            let captured_at = self.read_captured_at(now);
+            self.health.set_data_age(captured_at);
         }
 
         events
@@ -396,7 +467,9 @@ pub struct SyntheticCanary {
 
 impl SyntheticCanary {
     pub fn new() -> Self {
-        Self { health: ObserverHealth::new("synthetic_canary") }
+        Self {
+            health: ObserverHealth::new("synthetic_canary"),
+        }
     }
 }
 
@@ -412,7 +485,8 @@ impl Observer for SyntheticCanary {
     }
 
     fn poll(&mut self, now: DateTime<Utc>) -> Vec<Event> {
-        self.health.record_success(now, CapabilitySet::from_iter(["heartbeat"]));
+        self.health
+            .record_success(now, CapabilitySet::from_iter(["heartbeat"]));
         vec![Event {
             ts: now,
             source: self.name().to_string(),

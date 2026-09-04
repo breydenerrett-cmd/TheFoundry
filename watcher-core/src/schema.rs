@@ -36,7 +36,11 @@ pub struct EntityRef {
 
 impl EntityRef {
     pub fn new(entity_type: EntityType, id: impl Into<String>) -> Self {
-        Self { entity_type, id: id.into(), parent_id: None }
+        Self {
+            entity_type,
+            id: id.into(),
+            parent_id: None,
+        }
     }
     pub fn with_parent(mut self, parent_id: impl Into<String>) -> Self {
         self.parent_id = Some(parent_id.into());

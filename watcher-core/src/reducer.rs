@@ -7,7 +7,6 @@
 //!      not scattered across observers.
 
 use crate::health::{ObserverHealth, ObserverStatus};
-use crate::observer::{CAP_ROUTINES, CAP_SESSIONS};
 use crate::schema::{Event, EventKind, Fidelity, StationState};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -24,7 +23,11 @@ pub struct Field<T> {
 
 impl<T> Field<T> {
     pub fn new(value: T, observed_at: DateTime<Utc>, fidelity: Fidelity) -> Self {
-        Self { value, observed_at, fidelity }
+        Self {
+            value,
+            observed_at,
+            fidelity,
+        }
     }
 }
 
@@ -141,7 +144,8 @@ impl StateStore {
                             rec.gone_at = Some(now);
                         }
                         rec.gone = true;
-                        rec.displayed_state = Field::new(StationState::StaleUnknown, now, Fidelity::Observed);
+                        rec.displayed_state =
+                            Field::new(StationState::StaleUnknown, now, Fidelity::Observed);
                     }
                 }
                 EventKind::RoutineScheduled | EventKind::RoutineOverdue => {
@@ -168,25 +172,31 @@ impl StateStore {
         // timestamp data could never be flagged Hung no matter how many
         // hours passed. `now` is only an acceptable fallback the very first
         // time we ever see a session (nothing better to anchor to yet).
-        let activity_at = ev.metrics.elapsed_ms.map(|ms| now - chrono::Duration::milliseconds(ms));
+        let activity_at = ev
+            .metrics
+            .elapsed_ms
+            .map(|ms| now - chrono::Duration::milliseconds(ms));
 
-        let entry = self.sessions.entry(ev.entity.id.clone()).or_insert_with(|| SessionRecord {
-            id: ev.entity.id.clone(),
-            source: ev.source.clone(),
-            repo_hint: ev.entity.parent_id.clone(),
-            observed_state: Field::new(state, now, ev.fidelity),
-            displayed_state: Field::new(state, now, ev.fidelity),
-            model: None,
-            model_current: None,
-            model_last_served: None,
-            label: None,
-            session_kind: None,
-            last_polled_at: now,
-            last_activity_at: activity_at.unwrap_or(now),
-            stall_warning: false,
-            gone: false,
-            gone_at: None,
-        });
+        let entry = self
+            .sessions
+            .entry(ev.entity.id.clone())
+            .or_insert_with(|| SessionRecord {
+                id: ev.entity.id.clone(),
+                source: ev.source.clone(),
+                repo_hint: ev.entity.parent_id.clone(),
+                observed_state: Field::new(state, now, ev.fidelity),
+                displayed_state: Field::new(state, now, ev.fidelity),
+                model: None,
+                model_current: None,
+                model_last_served: None,
+                label: None,
+                session_kind: None,
+                last_polled_at: now,
+                last_activity_at: activity_at.unwrap_or(now),
+                stall_warning: false,
+                gone: false,
+                gone_at: None,
+            });
         entry.observed_state = Field::new(state, now, ev.fidelity);
         entry.displayed_state = Field::new(state, now, ev.fidelity);
         entry.source = ev.source.clone();
@@ -221,18 +231,21 @@ impl StateStore {
         // Defaulting to `true` (as this used to) would render a routine
         // whose enabled-state we can't confirm as a confident green
         // "ON SCHEDULE" — the safe default is `false` (adversarial finding #4).
-        let entry = self.routines.entry(ev.entity.id.clone()).or_insert_with(|| RoutineRecord {
-            id: ev.entity.id.clone(),
-            source: ev.source.clone(),
-            name: ev.label.clone().unwrap_or_default(),
-            bound_session_id: ev.session_id.clone(),
-            overdue,
-            enabled: ev.enabled.unwrap_or(false),
-            next_run_at: ev.next_run_at,
-            prompt_redacted: ev.detail.clone(),
-            last_seen_at: now,
-            stale: false,
-        });
+        let entry = self
+            .routines
+            .entry(ev.entity.id.clone())
+            .or_insert_with(|| RoutineRecord {
+                id: ev.entity.id.clone(),
+                source: ev.source.clone(),
+                name: ev.label.clone().unwrap_or_default(),
+                bound_session_id: ev.session_id.clone(),
+                overdue,
+                enabled: ev.enabled.unwrap_or(false),
+                next_run_at: ev.next_run_at,
+                prompt_redacted: ev.detail.clone(),
+                last_seen_at: now,
+                stale: false,
+            });
         entry.source = ev.source.clone();
         entry.name = ev.label.clone().unwrap_or_else(|| entry.name.clone());
         entry.bound_session_id = ev.session_id.clone().or(entry.bound_session_id.clone());
@@ -251,15 +264,21 @@ impl StateStore {
         // NOT poll time, which would make "last output" always read as
         // "just now" regardless of when the underlying work actually
         // finished (the same class of bug as finding #2).
-        let event_ts = ev.metrics.elapsed_ms.map(|ms| now - chrono::Duration::milliseconds(ms));
-        let entry = self.checks.entry(ev.entity.id.clone()).or_insert_with(|| CheckRecord {
-            id: ev.entity.id.clone(),
-            source: ev.source.clone(),
-            label: Field::new(label.clone(), now, ev.fidelity),
-            last_seen_at: now,
-            last_event_ts: event_ts,
-            repo_hint: ev.entity.parent_id.clone(),
-        });
+        let event_ts = ev
+            .metrics
+            .elapsed_ms
+            .map(|ms| now - chrono::Duration::milliseconds(ms));
+        let entry = self
+            .checks
+            .entry(ev.entity.id.clone())
+            .or_insert_with(|| CheckRecord {
+                id: ev.entity.id.clone(),
+                source: ev.source.clone(),
+                label: Field::new(label.clone(), now, ev.fidelity),
+                last_seen_at: now,
+                last_event_ts: event_ts,
+                repo_hint: ev.entity.parent_id.clone(),
+            });
         entry.source = ev.source.clone();
         entry.label = Field::new(label.clone(), now, ev.fidelity);
         if let Some(t) = event_ts {
@@ -317,15 +336,23 @@ impl StateStore {
     /// observer: it made local_claude's sessions look permanently degraded
     /// because it (correctly) never reports the *other* observer's
     /// capability name.
-    pub fn apply_observer_health(&mut self, health: &ObserverHealth, now: DateTime<Utc>, sessions_cap: Option<&str>, routines_cap: Option<&str>) {
+    pub fn apply_observer_health(
+        &mut self,
+        health: &ObserverHealth,
+        now: DateTime<Utc>,
+        sessions_cap: Option<&str>,
+        routines_cap: Option<&str>,
+    ) {
         let sessions_lost = sessions_cap.map(|cap| !health.capabilities.has(cap));
         let routines_lost = routines_cap.map(|cap| !health.capabilities.has(cap));
-        self.observer_health.insert(health.name.clone(), health.clone());
+        self.observer_health
+            .insert(health.name.clone(), health.clone());
 
         if let Some(true) = sessions_lost {
             for rec in self.sessions.values_mut() {
                 if rec.source == health.name {
-                    rec.displayed_state = Field::new(StationState::StaleUnknown, now, Fidelity::Unknown);
+                    rec.displayed_state =
+                        Field::new(StationState::StaleUnknown, now, Fidelity::Unknown);
                 }
             }
         }
@@ -364,7 +391,9 @@ impl StateStore {
     }
 
     pub fn last_sync_age_secs(&self, now: DateTime<Utc>) -> Option<i64> {
-        self.pipeline.last_any_event_at.map(|t| (now - t).num_seconds().max(0))
+        self.pipeline
+            .last_any_event_at
+            .map(|t| (now - t).num_seconds().max(0))
     }
 
     /// §5a output velocity, first cut: the most recent heartbeat-sourced
@@ -375,16 +404,26 @@ impl StateStore {
     /// APPROXIMATION: does not yet distinguish ok/degraded/escalate status,
     /// or fold in git commits — first-cut rollup, not a final taxonomy.
     pub fn last_output_at(&self) -> Option<DateTime<Utc>> {
-        self.checks.values().filter(|c| c.source == "heartbeat").filter_map(|c| c.last_event_ts).max()
+        self.checks
+            .values()
+            .filter(|c| c.source == "heartbeat")
+            .filter_map(|c| c.last_event_ts)
+            .max()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::observer::{CAP_ROUTINES, CAP_SESSIONS};
     use crate::schema::{EntityRef, EntityType, Metrics};
 
-    fn session_event(id: &str, state: StationState, fidelity: Fidelity, ts: DateTime<Utc>) -> Event {
+    fn session_event(
+        id: &str,
+        state: StationState,
+        fidelity: Fidelity,
+        ts: DateTime<Utc>,
+    ) -> Event {
         Event {
             ts,
             source: "remote_claude".into(),
@@ -411,7 +450,15 @@ mod tests {
     fn brey_required_is_never_downgraded_to_generic_waiting() {
         let mut store = StateStore::new();
         let now = Utc::now();
-        store.apply_events(&[session_event("s1", StationState::BreyRequired, Fidelity::Observed, now)], now);
+        store.apply_events(
+            &[session_event(
+                "s1",
+                StationState::BreyRequired,
+                Fidelity::Observed,
+                now,
+            )],
+            now,
+        );
         let rec = &store.sessions["s1"];
         assert_eq!(rec.displayed_state.value, StationState::BreyRequired);
     }
@@ -420,8 +467,19 @@ mod tests {
     fn working_session_goes_hung_after_threshold_with_inferred_fidelity() {
         let mut store = StateStore::new();
         let t0 = Utc::now();
-        store.apply_events(&[session_event("s1", StationState::Working, Fidelity::Observed, t0)], t0);
-        assert_eq!(store.sessions["s1"].displayed_state.value, StationState::Working);
+        store.apply_events(
+            &[session_event(
+                "s1",
+                StationState::Working,
+                Fidelity::Observed,
+                t0,
+            )],
+            t0,
+        );
+        assert_eq!(
+            store.sessions["s1"].displayed_state.value,
+            StationState::Working
+        );
 
         let later = t0 + chrono::Duration::seconds(STALL_CONFIRM_SECS + 5);
         store.derive_stalls(later);
@@ -434,30 +492,64 @@ mod tests {
     fn stall_warning_flips_before_full_confirmation() {
         let mut store = StateStore::new();
         let t0 = Utc::now();
-        store.apply_events(&[session_event("s1", StationState::Working, Fidelity::Observed, t0)], t0);
+        store.apply_events(
+            &[session_event(
+                "s1",
+                StationState::Working,
+                Fidelity::Observed,
+                t0,
+            )],
+            t0,
+        );
         let warn_time = t0 + chrono::Duration::seconds((STALL_CONFIRM_SECS as f64 * 0.7) as i64);
         store.derive_stalls(warn_time);
         let rec = &store.sessions["s1"];
         assert!(rec.stall_warning);
-        assert_eq!(rec.displayed_state.value, StationState::Working, "still Working, only warning, below full threshold");
+        assert_eq!(
+            rec.displayed_state.value,
+            StationState::Working,
+            "still Working, only warning, below full threshold"
+        );
     }
 
     #[test]
     fn non_working_states_never_derive_hung() {
         let mut store = StateStore::new();
         let t0 = Utc::now();
-        store.apply_events(&[session_event("s1", StationState::Idle, Fidelity::Observed, t0)], t0);
+        store.apply_events(
+            &[session_event(
+                "s1",
+                StationState::Idle,
+                Fidelity::Observed,
+                t0,
+            )],
+            t0,
+        );
         let later = t0 + chrono::Duration::seconds(STALL_CONFIRM_SECS * 10);
         store.derive_stalls(later);
-        assert_eq!(store.sessions["s1"].displayed_state.value, StationState::Idle);
+        assert_eq!(
+            store.sessions["s1"].displayed_state.value,
+            StationState::Idle
+        );
     }
 
     #[test]
     fn observer_going_down_degrades_its_sessions_to_stale_not_frozen_healthy() {
         let mut store = StateStore::new();
         let t0 = Utc::now();
-        store.apply_events(&[session_event("s1", StationState::Working, Fidelity::Observed, t0)], t0);
-        assert_eq!(store.sessions["s1"].displayed_state.value, StationState::Working);
+        store.apply_events(
+            &[session_event(
+                "s1",
+                StationState::Working,
+                Fidelity::Observed,
+                t0,
+            )],
+            t0,
+        );
+        assert_eq!(
+            store.sessions["s1"].displayed_state.value,
+            StationState::Working
+        );
 
         let mut health = ObserverHealth::new("remote_claude");
         health.record_failure("e1");
@@ -465,9 +557,20 @@ mod tests {
         health.record_failure("e3"); // -> Down
         assert_eq!(health.status, ObserverStatus::Down);
 
-        store.apply_observer_health(&health, t0 + chrono::Duration::seconds(30), Some(CAP_SESSIONS), Some(CAP_ROUTINES));
-        assert_eq!(store.sessions["s1"].displayed_state.value, StationState::StaleUnknown);
-        assert_eq!(store.sessions["s1"].displayed_state.fidelity, Fidelity::Unknown);
+        store.apply_observer_health(
+            &health,
+            t0 + chrono::Duration::seconds(30),
+            Some(CAP_SESSIONS),
+            Some(CAP_ROUTINES),
+        );
+        assert_eq!(
+            store.sessions["s1"].displayed_state.value,
+            StationState::StaleUnknown
+        );
+        assert_eq!(
+            store.sessions["s1"].displayed_state.fidelity,
+            Fidelity::Unknown
+        );
     }
 
     #[test]
@@ -480,26 +583,29 @@ mod tests {
     fn pipeline_verified_with_recent_canary() {
         let mut store = StateStore::new();
         let now = Utc::now();
-        store.apply_events(&[Event {
-            ts: now,
-            source: "synthetic_canary".into(),
-            kind: EventKind::Heartbeat,
-            entity: EntityRef::new(EntityType::Project, "__pipeline__"),
-            project_id: None,
-            session_id: None,
-            model: None,
-            model_current: None,
-            model_last_served: None,
-            effort: None,
-            state: None,
-            label: None,
-            detail: None,
-            fidelity: Fidelity::Observed,
-            metrics: Metrics::default(),
-            ttl_secs: Some(120),
-            next_run_at: None,
-            enabled: None,
-        }], now);
+        store.apply_events(
+            &[Event {
+                ts: now,
+                source: "synthetic_canary".into(),
+                kind: EventKind::Heartbeat,
+                entity: EntityRef::new(EntityType::Project, "__pipeline__"),
+                project_id: None,
+                session_id: None,
+                model: None,
+                model_current: None,
+                model_last_served: None,
+                effort: None,
+                state: None,
+                label: None,
+                detail: None,
+                fidelity: Fidelity::Observed,
+                metrics: Metrics::default(),
+                ttl_secs: Some(120),
+                next_run_at: None,
+                enabled: None,
+            }],
+            now,
+        );
         assert!(store.pipeline_verified(now, 300));
     }
 }

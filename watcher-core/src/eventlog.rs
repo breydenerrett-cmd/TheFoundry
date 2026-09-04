@@ -18,7 +18,11 @@ pub struct EventLog {
 }
 
 impl EventLog {
-    pub fn new(dir: impl AsRef<Path>, ring_capacity: usize, retention_files: usize) -> std::io::Result<Self> {
+    pub fn new(
+        dir: impl AsRef<Path>,
+        ring_capacity: usize,
+        retention_files: usize,
+    ) -> std::io::Result<Self> {
         fs::create_dir_all(&dir)?;
         Ok(Self {
             ring: VecDeque::with_capacity(ring_capacity.min(1 << 20)),
@@ -122,7 +126,8 @@ mod tests {
         let mut log = EventLog::new(dir.path(), 3, 30).unwrap();
         let base = Utc.with_ymd_and_hms(2026, 9, 4, 0, 0, 0).unwrap();
         for i in 0..10 {
-            log.append(&[ev(base + chrono::Duration::seconds(i))]).unwrap();
+            log.append(&[ev(base + chrono::Duration::seconds(i))])
+                .unwrap();
         }
         assert_eq!(log.ring_len(), 3);
     }
@@ -135,7 +140,10 @@ mod tests {
         let day2 = Utc.with_ymd_and_hms(2026, 9, 5, 0, 0, 1).unwrap();
         log.append(&[ev(day1)]).unwrap();
         log.append(&[ev(day2)]).unwrap();
-        let files: Vec<_> = fs::read_dir(dir.path()).unwrap().filter_map(|e| e.ok()).collect();
+        let files: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
         assert_eq!(files.len(), 2);
     }
 
@@ -147,7 +155,14 @@ mod tests {
             let ts = Utc.with_ymd_and_hms(2026, 9, day, 0, 0, 0).unwrap();
             log.append(&[ev(ts)]).unwrap();
         }
-        let files: Vec<_> = fs::read_dir(dir.path()).unwrap().filter_map(|e| e.ok()).collect();
-        assert_eq!(files.len(), 2, "only the retention_files-most-recent day files should remain");
+        let files: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(
+            files.len(),
+            2,
+            "only the retention_files-most-recent day files should remain"
+        );
     }
 }

@@ -23,3 +23,13 @@
 
 **Security/resource notes**
 - Repo is currently PUBLIC. Verified no secrets in tree (redactor tests + earlier scans). No tokens were printed anywhere in this session.
+
+## 2026-09-04T21:50Z — T-01 truth gate + T-02 CI
+
+**Completed**
+- T-01: live text-mode run (fixture remote feed + real git + heartbeat file) exercised every observer, bay grouping, output velocity, redaction (paths in heartbeat `error` and session labels → `[REDACTED-SECRET]`), observer health, 3 BREY_REQUIRED, HUNG, STALE/UNKNOWN. **Found a truth bug**: `REMOTE ESTATE: live (last sync 0s)` rendered for a snapshot captured at 13:40Z because sync age measured *file read* time. Fixed: snapshot capture time now comes from `<feed-dir>/captured_at` (or a top-level `captured_at` field); missing/future-skewed → observer Degraded + "REMOTE ESTATE — DEGRADED". Proof after fix: `REMOTE ESTATE — DEGRADED (last sync 7h51m ago …)`. +3 red-team tests → **58/58**. Compiler warnings cleared; `cargo clippy -D warnings` and `cargo fmt --check` clean (workspace-wide fmt applied — formatting-only diff).
+- T-02: `.github/workflows/ci.yml` — fmt, clippy, test, plus a smoke step asserting `--no-remote` never prints "REMOTE ESTATE: live".
+- W-02 → BLOCKED_EXTERNAL: `create_trigger` and `send_later` both denied by the permission classifier; loop persists only within this turn.
+
+**Model usage**: one Sonnet worker (~106k tokens) for the fix; Fable orchestration.
+**Next**: P-01 project resolution v2 (UNRESOLVED bay, explicit map), then S-01 persistence.

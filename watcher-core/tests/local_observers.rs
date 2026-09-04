@@ -31,7 +31,11 @@ fn local_claude_observer_never_panics_and_reports_a_definite_health_state() {
 /// see local.rs's comment on why that would falsely trigger Hung).
 #[test]
 fn local_claude_observer_finds_real_sessions_when_present() {
-    let have_claude_cli = Command::new("claude").arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
+    let have_claude_cli = Command::new("claude")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
     if !have_claude_cli {
         eprintln!("skipping: `claude` CLI not present in this environment");
         return;
@@ -53,7 +57,12 @@ fn local_claude_observer_finds_real_sessions_when_present() {
 fn git_observer_reports_real_branch_and_dirty_state() {
     let dir = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
-        let status = Command::new("git").arg("-C").arg(dir.path()).args(args).status().unwrap();
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(args)
+            .status()
+            .unwrap();
         assert!(status.success(), "git {args:?} failed");
     };
     run(&["init", "-q", "-b", "main"]);
@@ -68,16 +77,31 @@ fn git_observer_reports_real_branch_and_dirty_state() {
     let events = obs.poll(now);
     assert_eq!(events.len(), 1);
     let label = events[0].label.as_ref().unwrap();
-    assert!(label.contains("branch=main"), "expected branch=main in: {label}");
-    assert!(label.contains("dirty=false"), "clean repo must report dirty=false: {label}");
-    assert!(label.contains("initial commit"), "expected commit message in: {label}");
-    assert_eq!(obs.health().status, foundry_core::health::ObserverStatus::Healthy);
+    assert!(
+        label.contains("branch=main"),
+        "expected branch=main in: {label}"
+    );
+    assert!(
+        label.contains("dirty=false"),
+        "clean repo must report dirty=false: {label}"
+    );
+    assert!(
+        label.contains("initial commit"),
+        "expected commit message in: {label}"
+    );
+    assert_eq!(
+        obs.health().status,
+        foundry_core::health::ObserverStatus::Healthy
+    );
 
     // Now dirty it.
     std::fs::write(dir.path().join("file.txt"), "changed").unwrap();
     let events2 = obs.poll(now);
     let label2 = events2[0].label.as_ref().unwrap();
-    assert!(label2.contains("dirty=true"), "modified repo must report dirty=true: {label2}");
+    assert!(
+        label2.contains("dirty=true"),
+        "modified repo must report dirty=true: {label2}"
+    );
 }
 
 #[test]
@@ -85,6 +109,12 @@ fn git_observer_degrades_honestly_on_a_non_git_directory() {
     let dir = tempfile::tempdir().unwrap(); // no `git init` run
     let mut obs = GitObserver::new(dir.path());
     let events = obs.poll(Utc::now());
-    assert!(events.is_empty(), "must not fabricate git state for a non-repo directory");
-    assert_ne!(obs.health().status, foundry_core::health::ObserverStatus::Healthy);
+    assert!(
+        events.is_empty(),
+        "must not fabricate git state for a non-repo directory"
+    );
+    assert_ne!(
+        obs.health().status,
+        foundry_core::health::ObserverStatus::Healthy
+    );
 }
