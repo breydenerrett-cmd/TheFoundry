@@ -1,0 +1,29 @@
+# WEEKEND QUEUE — THE FOUNDRY (source of truth)
+
+Status values: `READY` `RUNNING` `VERIFYING` `DONE` `BLOCKED_HUMAN` `BLOCKED_EXTERNAL` `FAILED_RETRYABLE` `FAILED_TERMINAL`
+
+Rules: one task RUNNING at a time. A RUNNING row older than 90 min with no commit is reclaimed. Update this file after every completed or blocked task.
+
+| ID | Task | Pri | Deps | Model | Status | Evidence required | Commit | Blocker / notes |
+|---|---|---|---|---|---|---|---|---|
+| W-01 | Create weekend control files (plan, queue, progress) | P0 | — | Fable | DONE | files in repo root, pushed | (this commit) | |
+| W-02 | Create hourly Routine `Foundry Weekend Build Loop` (or documented fallback) | P0 | W-01 | Fable | READY | trigger id recorded in progress log | | |
+| R-01 | Standalone repo: history pushed, builds, 55 tests pass | P0 | — | Fable | DONE | `main`@`db570b9` on origin; `cargo test` 55/55 in fresh clone | db570b9 | |
+| R-02 | Close aisportsanalysis PR #1 with extraction note; sports repo unaffected | P0 | R-01 | Fable | DONE | PR closed, comment posted; sports branch head unchanged `91b0664`, clean tree | — | |
+| R-03 | Rename repo `TheFoundry` → `the-foundry` | P0 | — | — | BLOCKED_HUMAN | repo metadata shows new name | | Proxy rejects repo-settings writes; no browser control here. **Brey:** GitHub → Settings → General → Repository name → `the-foundry`. ~10s. |
+| R-04 | Set repo visibility PRIVATE | P0 | — | — | BLOCKED_HUMAN | `visibility: private` | | Same limitation. **Brey:** Settings → Danger Zone → Change visibility → Private. Nothing sensitive is in the repo meanwhile. |
+| G-01 | Set up `gh` CLI + auth on Brey's Windows machine | P0 | — | — | BLOCKED_HUMAN | `gh auth status` output | | This session is a cloud sandbox with no access to the Windows machine or Chrome. **Brey:** `winget install GitHub.cli` then `gh auth login` (browser flow, token stays in Windows Credential Manager); then a local Claude Code session can drive `gh`. |
+| G-02 | Document what GitHub ops are autonomous from this session vs need Brey | P0 | — | Haiku | DONE | section in WEEKEND_PROGRESS.md | (this commit) | |
+| T-01 | Phase 4 truth-gate re-verification (all observers, bays, velocity, degraded remote, redaction, health, BREY_REQUIRED, fading/gone) — record a live text-mode run | P0 | R-01 | Sonnet | READY | `cargo test` green + captured `foundry --no-remote` and fixture-fed floor output in progress log | | |
+| T-02 | Add CI: GitHub Actions `cargo fmt --check`, `clippy`, `cargo test` on push/PR | P0 | R-01 | Sonnet | READY | workflow file, green run on `main` | | |
+| H-01 | Real Sports heartbeats: add `foundry_beat` to forward_capture/daily_loop/monitor_remote/test_parallel at safe boundaries, on the branch that owns them | P1 | T-01 | Sonnet | READY | diff on `claude/sports-betting-analysis-review-g1o0co` (new branch off it + PR, not in-place), plus Foundry reading ≥1 real line | | Scripts live in aisportsanalysis on a branch with active workers — must land via a PR, never an in-place edit. Proof of *real* events needs a run on Brey's machine; may end `BLOCKED_HUMAN` for the proof step. |
+| P-01 | Project resolution v2: explicit repo→bay map file + tags/rules, UNKNOWN bay preserved (no guessing), tests | P1 | T-01 | Sonnet | READY | `bay.rs` rules file + tests | | |
+| S-01 | Persistent state: SQLite snapshot + sequence numbers + restart recovery; prove restart does not fabricate healthy state | P1 | T-01 | Sonnet | READY | tests incl. "restart-from-snapshot renders UNVERIFIED until fresh events" | | |
+| M-01 | Multi-machine foundation: `foundry-agent` binary (local observers → signed JSON over pluggable transport) + reducer ingest of `source=local_claude@host` | P1 | S-01 | Sonnet | READY | agent emits, main ingests from file transport; auth test | | |
+| O-01 | Opus adversarial review of truth mapping before visuals (narrow scope: reducer + persistence + agent ingest) | P1 | S-01, M-01 | Opus | READY | findings list, each fixed with a test | | Only Opus use authorized this weekend. |
+| V-01 | Static visual foundation: Tauri + React + Pixi shell, marquee, six bays, stations, state colors, observed/inferred, output shelf, fault beacon (fixture-driven) | P2 | T-01, T-02 | Sonnet | READY | `npm run build` passes; screenshot via Playwright of fixture floor | | Visual build authorized once truth gate green. |
+| V-02 | 3-second glance: motion density, BREY_REQUIRED/FAILED beacons, STALE hatching, Opus plume, LAST OUTPUT / NEXT ROUTINE, counts | P2 | V-01 | Sonnet | READY | screenshots per state | | |
+| V-03 | All station states rendered; never animate unobserved work | P2 | V-02 | Sonnet | READY | state-mapping table test | | |
+| V-04 | Modes: Command Center, Project Focus, Ambient, Incident, Deep Debug | P2 | V-03 | Sonnet | READY | hotkeys, screenshots | | |
+| V-05 | Performance: measured idle CPU/RSS, frame-rate ladder, particle budget | P2 | V-04 | Sonnet | READY | numbers recorded | | |
+| Z-01 | Write `WEEKEND_HANDOFF.md` | P0 | (end of weekend) | Fable | READY | file in repo | | Produce before autonomous mode ends. |
