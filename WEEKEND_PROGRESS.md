@@ -60,3 +60,10 @@
 - Playwright 4/4 (state mapping, overlay, marquee count, screenshot at `app/screenshots/floor-fixture.png`). CI gained a `web` job (build + Playwright). Tauri is scaffolded only — no webkit2gtk in this sandbox.
 - Honest assessment: a correct foundation, not yet a polished visual — stations are small primitives; density/motion/typography come in V-02..V-05.
 - Sonnet worker ~110k tokens. M-01 worker running.
+
+## 2026-09-04T23:30Z — M-01 multi-machine foundation
+
+- `foundry-agent` (second binary) runs the same zero-token local observers per machine and publishes HMAC-SHA256-signed bundles (`sign.rs`, key from `FOUNDRY_AGENT_KEY`/`--key-file` only, never logged) over a replaceable transport (`transport.rs`; file transport built, HTTP push documented as next). Main side `AgentIngestObserver` rejects bad signature / unknown key id / replayed seq / >5 min skew — each as visible per-agent degradation, never a silent drop. New `MACHINES` render section; silent agents past TTL leave sessions STALE/UNKNOWN, never stuck WORKING. Redaction applied again before signing (tested).
+- Tests 74 → **88**; clippy/fmt clean; both binaries build.
+- CI: run #5 failed (`vite preview` bound to ::1 on Node 24 runners vs 127.0.0.1 baseURL) — fixed in 992687f by `--host 127.0.0.1`.
+- Sonnet worker ~181k tokens. V-02 worker running in `app/`.

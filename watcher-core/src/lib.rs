@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod bay;
 pub mod eventlog;
 pub mod health;
@@ -9,3 +10,5 @@ pub mod redact;
 pub mod reducer;
 pub mod render;
 pub mod schema;
+pub mod sign;
+pub mod transport;

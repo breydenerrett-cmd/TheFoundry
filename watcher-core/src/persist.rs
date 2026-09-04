@@ -142,6 +142,10 @@ pub fn mark_restored(store: &mut StateStore, saved_at: DateTime<Utc>) {
     }
     // Observer health is NOT restored — every observer starts Unverified.
     store.observer_health.clear();
+    // Same rule for Phase 4D machines: a restored floor has heard nothing
+    // from any agent in THIS process yet, so the MACHINES view starts empty
+    // rather than carrying over a prior process's (now unverifiable) rows.
+    store.machines.clear();
     store.pipeline.restored_at = Some(saved_at);
 }
 

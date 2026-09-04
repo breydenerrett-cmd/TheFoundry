@@ -8,6 +8,10 @@ description = "THE FOUNDRY watcher/state core: normalized events, observers, red
 name = "foundry"
 path = "src/main.rs"
 
+[[bin]]
+name = "foundry-agent"
+path = "src/bin/foundry-agent.rs"
+
 [lib]
 name = "foundry_core"
 path = "src/lib.rs"
@@ -18,6 +22,8 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 toml = "1.1.5"
+hmac = "0.12"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"

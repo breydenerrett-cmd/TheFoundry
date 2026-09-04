@@ -23,6 +23,7 @@
 //! PHASE3_5_ACCESS_BRIDGE.md.
 
 use chrono::Utc;
+use foundry_core::agents::AgentIngestObserver;
 use foundry_core::bay::BayMap;
 use foundry_core::eventlog::EventLog;
 use foundry_core::heartbeat::HeartbeatObserver;
@@ -31,6 +32,8 @@ use foundry_core::observer::{Observer, RemoteClaudeObserver, SyntheticCanary};
 use foundry_core::persist::{self, LoadOutcome};
 use foundry_core::reducer::StateStore;
 use foundry_core::render::{render_audit, render_floor};
+use foundry_core::transport::FileTransportReceiver;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -47,6 +50,17 @@ struct Args {
     /// S-01: skip loading `<log-dir>/snapshot.json` at startup even if it
     /// exists — always start from a clean, fully-fresh `StateStore`.
     no_restore: bool,
+    /// Phase 4D M-01: directory a `FileTransportReceiver` drains
+    /// `<agent_id>.jsonl` envelopes from. `None` means no agent ingest at
+    /// all — the MACHINES section is simply omitted, same as any other
+    /// unconfigured observer.
+    agents_dir: Option<PathBuf>,
+    agent_ttl_secs: i64,
+    /// `"id=path,id2=path2"` — one or more key_id -> secret-file mappings.
+    agent_keys_arg: Option<String>,
+    /// Paired with `FOUNDRY_AGENT_KEY` in the environment for the
+    /// single-key case: `--agent-key-id NAME` + `FOUNDRY_AGENT_KEY=...`.
+    agent_key_id: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -60,6 +74,10 @@ fn parse_args() -> Args {
     let mut no_remote = false;
     let mut bay_map_path = PathBuf::from("foundry.bays.toml");
     let mut no_restore = false;
+    let mut agents_dir = None;
+    let mut agent_ttl_secs = foundry_core::agents::DEFAULT_AGENT_TTL_SECS;
+    let mut agent_keys_arg = None;
+    let mut agent_key_id = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -91,6 +109,24 @@ fn parse_args() -> Args {
                     .expect("--watch value must be a number of seconds");
                 watch_secs = Some(secs);
             }
+            "--agents-dir" => {
+                agents_dir = Some(PathBuf::from(
+                    args.next().expect("--agents-dir needs a value"),
+                ))
+            }
+            "--agent-ttl" => {
+                agent_ttl_secs = args
+                    .next()
+                    .expect("--agent-ttl needs a value")
+                    .parse()
+                    .expect("--agent-ttl value must be a number of seconds")
+            }
+            "--agent-keys" => {
+                agent_keys_arg = Some(args.next().expect("--agent-keys needs a value"))
+            }
+            "--agent-key-id" => {
+                agent_key_id = Some(args.next().expect("--agent-key-id needs a value"))
+            }
             other => eprintln!("warning: unrecognized argument '{other}', ignoring"),
         }
     }
@@ -105,7 +141,55 @@ fn parse_args() -> Args {
         no_remote,
         bay_map_path,
         no_restore,
+        agents_dir,
+        agent_ttl_secs,
+        agent_keys_arg,
+        agent_key_id,
     }
+}
+
+/// Builds the key_id -> shared-secret map for verifying agent bundles, from
+/// `--agent-keys id=path,...` and/or `--agent-key-id NAME` paired with the
+/// `FOUNDRY_AGENT_KEY` environment variable. The secret is read ONLY from a
+/// file or that env var — never accepted as a bare CLI argument value, and
+/// never logged.
+fn build_agent_keyring(
+    agent_keys_arg: &Option<String>,
+    agent_key_id: &Option<String>,
+) -> BTreeMap<String, Vec<u8>> {
+    let mut map = BTreeMap::new();
+    if let Some(spec) = agent_keys_arg {
+        for pair in spec.split(',') {
+            let pair = pair.trim();
+            if pair.is_empty() {
+                continue;
+            }
+            match pair.split_once('=') {
+                Some((id, path)) => match std::fs::read_to_string(path) {
+                    Ok(secret) => {
+                        map.insert(id.to_string(), secret.trim().as_bytes().to_vec());
+                    }
+                    Err(e) => eprintln!(
+                        "warning: could not read agent key file '{path}' for key_id '{id}': {e}"
+                    ),
+                },
+                None => {
+                    eprintln!("warning: malformed --agent-keys entry '{pair}', expected id=path")
+                }
+            }
+        }
+    }
+    if let Some(id) = agent_key_id {
+        match std::env::var("FOUNDRY_AGENT_KEY") {
+            Ok(secret) => {
+                map.insert(id.clone(), secret.into_bytes());
+            }
+            Err(_) => eprintln!(
+                "warning: --agent-key-id given but FOUNDRY_AGENT_KEY is not set — that key_id will reject everything"
+            ),
+        }
+    }
+    map
 }
 
 fn main() {
@@ -119,6 +203,14 @@ fn main() {
         .as_ref()
         .map(|d| HeartbeatObserver::new(d, args.heartbeat_label.clone()));
     let mut canary = SyntheticCanary::new();
+    let mut agent_ingest = args.agents_dir.as_ref().map(|dir| {
+        let keyring = build_agent_keyring(&args.agent_keys_arg, &args.agent_key_id);
+        AgentIngestObserver::new(
+            Box::new(FileTransportReceiver::new(dir)),
+            keyring,
+            args.agent_ttl_secs,
+        )
+    });
     let mut log =
         EventLog::new(&args.log_dir, 50_000, 30).expect("failed to open event log directory");
 
@@ -188,6 +280,9 @@ fn main() {
             all_events.extend(hb.poll(now));
         }
         all_events.extend(canary.poll(now));
+        if let Some(ai) = &mut agent_ingest {
+            all_events.extend(ai.poll(now));
+        }
 
         store.apply_events(&all_events, now);
         if let Some(remote) = &remote {
@@ -209,6 +304,10 @@ fn main() {
             store.apply_observer_health(hb.health(), now, None, None);
         }
         store.apply_observer_health(canary.health(), now, None, None);
+        if let Some(ai) = &agent_ingest {
+            store.apply_observer_health(ai.health(), now, None, None);
+            store.set_machines(ai.machines(now));
+        }
 
         if let Err(e) = log.append(&all_events) {
             eprintln!("warning: event log write failed: {e}");

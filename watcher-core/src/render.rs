@@ -391,6 +391,31 @@ pub fn render_floor(
         }
     }
 
+    // Phase 4D M-01: one row per agent this process has ever heard from
+    // (accepted or rejected) — omitted entirely when no `--agents-dir` was
+    // configured, exactly like the CHECKS section above.
+    if !store.machines.is_empty() {
+        out.push_str(&format!("\n{BOLD}MACHINES{RESET}\n"));
+        for m in store.machines.values() {
+            let (status_color, status_label) = match m.status {
+                crate::reducer::MachineStatus::Reachable => ("\x1b[32m", "REACHABLE"),
+                crate::reducer::MachineStatus::Unreachable => ("\x1b[1;31m", "UNREACHABLE"),
+            };
+            let age = m
+                .last_heard_at
+                .map(|t| fmt_age((now - t).num_seconds().max(0)))
+                .unwrap_or_else(|| "never".into());
+            let caps = m.capabilities.join(", ");
+            out.push_str(&format!(
+                "  {status_color}[{status_label:>11}]{RESET} {} — last-heard: {} — capabilities: [{}]\n",
+                m.agent_id, age, caps,
+            ));
+            if let Some(r) = &m.reason {
+                out.push_str(&format!("      reason: {DIM}{r}{RESET}\n"));
+            }
+        }
+    }
+
     out
 }
 

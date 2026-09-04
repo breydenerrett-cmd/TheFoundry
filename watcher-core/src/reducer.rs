@@ -156,6 +156,31 @@ pub struct PipelineHealth {
     pub restored_at: Option<DateTime<Utc>>,
 }
 
+/// Phase 4D M-01: whether a machine (a `foundry-agent` process publishing
+/// via a `transport::Publisher`) is currently reachable. `Unreachable`
+/// covers both "no bundle within `--agent-ttl`" and "the last bundle we DID
+/// receive failed verification" — either way this must render as a visible
+/// degradation, never a silent drop (§16).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MachineStatus {
+    Reachable,
+    Unreachable,
+}
+
+/// One row of the `MACHINES` render section — a snapshot of what
+/// `agents::AgentIngestObserver` currently knows about a single agent_id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MachineRecord {
+    pub agent_id: String,
+    pub status: MachineStatus,
+    pub last_heard_at: Option<DateTime<Utc>>,
+    /// Human-readable reason for `Unreachable` (a rejection cause, or
+    /// "agent unreachable" for a plain TTL expiry). `None` when `Reachable`.
+    pub reason: Option<String>,
+    pub capabilities: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StateStore {
     pub sessions: BTreeMap<String, SessionRecord>,
@@ -163,6 +188,12 @@ pub struct StateStore {
     pub checks: BTreeMap<String, CheckRecord>,
     pub observer_health: BTreeMap<String, ObserverHealth>,
     pub pipeline: PipelineHealth,
+    /// Phase 4D M-01: the current `MACHINES` view, keyed by agent_id.
+    /// Replaced wholesale each poll by `set_machines` — this is a live
+    /// status snapshot, not an event-sourced record, so it is cleared (not
+    /// restored) across a snapshot load, matching `observer_health`.
+    #[serde(default)]
+    pub machines: BTreeMap<String, MachineRecord>,
 }
 
 impl StateStore {
@@ -492,6 +523,12 @@ impl StateStore {
         self.observer_health
             .values()
             .any(|h| h.name != "synthetic_canary" && matches!(h.status, ObserverStatus::Down))
+    }
+
+    /// Replaces the whole `MACHINES` view for this poll — called with
+    /// `AgentIngestObserver::machines(now)`'s freshly-computed rows.
+    pub fn set_machines(&mut self, rows: Vec<MachineRecord>) {
+        self.machines = rows.into_iter().map(|r| (r.agent_id.clone(), r)).collect();
     }
 
     pub fn last_sync_age_secs(&self, now: DateTime<Utc>) -> Option<i64> {

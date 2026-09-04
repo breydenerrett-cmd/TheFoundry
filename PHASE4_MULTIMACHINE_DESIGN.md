@@ -1,4 +1,76 @@
-# Phase 4D — Multi-Machine Peer Model (design only, not built)
+# Phase 4D — Multi-Machine Peer Model
+
+**Status: foundation built — file transport only.** M-01 (this doc's design,
+below) is implemented in `watcher-core`: a `foundry-agent` binary runs the
+same zero-model-token local observers on a machine, signs each poll's
+events with HMAC-SHA256, and publishes them to a shared directory; the main
+`foundry` binary verifies, ingests, and renders them in a new `MACHINES`
+section. The transport is the one piece deliberately left minimal — see
+"What's still open" below.
+
+## Running the agent
+
+```
+FOUNDRY_AGENT_KEY=<shared secret> foundry-agent \
+    --agent-id pc \
+    --transport-dir /path/to/shared/dir \
+    --key-id k1 \
+    --git-dir /path/to/repo1 [--git-dir /path/to/repo2 ...] \
+    [--heartbeat-dir DIR] [--once | --watch 30]
+```
+
+- The secret is read ONLY from `FOUNDRY_AGENT_KEY` or `--key-file PATH` —
+  never accepted as a bare CLI argument value, never logged.
+- `--key-id` is a short, non-secret label naming which shared secret signed
+  the bundle (not the secret itself) — the main side maps `key_id` back to
+  the matching secret via its own keyring.
+- Default is single-shot (poll once, publish once, exit) — `--once` is
+  accepted explicitly for clarity at the call site; pass `--watch SECS` to
+  keep publishing on an interval.
+- Every event's `source` is rewritten to `"<observer>@<agent_id>"` (e.g.
+  `local_claude@pc`) before signing — the reducer already treats `source`
+  as an arbitrary observer name, so per-machine staleness/capability
+  tracking works with zero changes to the reducer or renderer.
+
+Main side:
+
+```
+foundry --agents-dir /path/to/shared/dir \
+    --agent-keys k1=/path/to/keyfile \
+    [--agent-ttl 120] \
+    [other usual foundry flags...]
+```
+
+(or `--agent-key-id k1` paired with `FOUNDRY_AGENT_KEY` in the main
+process's own environment, for the single-key case.) An agent that goes
+quiet past `--agent-ttl` (default 120s) renders `UNREACHABLE` in the
+`MACHINES` section; its sessions are not force-expired specially — they age
+out honestly through the ordinary per-session TTL path once the agent
+simply stops supplying fresh events, the same as any other observer going
+quiet.
+
+## What's still open
+
+- **HTTP transport.** `FileTransport` (a shared directory both processes can
+  read/write — works today for co-located machines, e.g. a synced folder or
+  a shared drive) is the only `transport::Publisher`/`Receiver`
+  implementation built. An authenticated HTTP push (agent -> main's LAN
+  address) remains the recommended next implementation per the design
+  below — `Publisher`/`Receiver` is the seam it slots into; nothing in
+  `agents.rs`, the reducer, or the renderer should need to change.
+- **Key provisioning UX.** Keys are currently plain files a human copies
+  around by hand (`--key-file` / `--agent-keys id=path`). No key rotation,
+  no OS credential-store integration (§15's original recommendation), no
+  provisioning flow for "add a new machine." Fine for a single operator
+  running two machines; not yet a real onboarding story.
+- Everything else originally flagged below (which machines, which network,
+  a real multi-writer eventlog/persistence story if agents and main ever
+  run as genuinely independent long-lived processes with their own state)
+  is still open.
+
+---
+
+## Original design (below), now implemented as described above
 
 ## Problem
 
