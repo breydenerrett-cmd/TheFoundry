@@ -1,6 +1,6 @@
 # WEEKEND HANDOFF — THE FOUNDRY
 
-Repo: https://github.com/breydenerrett-cmd/TheFoundry (default branch `main`, head `c33775d`, CI green)
+Repo: https://github.com/breydenerrett-cmd/TheFoundry (default branch `main`, head `611e2e9`, CI green)
 
 ## Starting state (Fri 2026-09-04 ~21:20Z)
 - Foundry lived only in `aisportsanalysis` PR #1 (`ops-room/`), unmerged. Rust truth layer at Phase 4: 55 tests, text renderer, fixture-fed remote feed, local/git/heartbeat observers, no UI, no persistence, no multi-machine, no live bridge.
@@ -38,7 +38,7 @@ git clone https://github.com/breydenerrett-cmd/TheFoundry && cd TheFoundry
 Screenshots (committed): `app/screenshots/live-floor.png` (real watcher), `live-down.png`, `floor-fixture.png`, `floor-states.png`, `floor-idle.png`, `floor-blind.png`, `mode-*.png`.
 
 ## Test totals
-Rust 55 → **108** · Playwright 0 → **27** · CI runs #14/#15 green; #16 (c33775d) pending at handoff time.
+Rust 55 → **108** · Playwright 0 → **27** · CI green on the final head (run on 611e2e9 passed: Rust 108 tests, Playwright 27); two post-handoff test fixes were CI-only environment assumptions (empty estate on runners; ambient first-frame timing).
 
 ## Architecture changes
 - `persist.rs` (snapshot + seq), `export.rs` + `httpd.rs` (FloorState JSON, loopback HTTP), `agents.rs`/`sign.rs`/`transport.rs` (multi-machine), `bay.rs` v2 (BayMap), marquee derivations moved into shared reducer methods so text and JSON cannot disagree.

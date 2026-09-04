@@ -117,3 +117,8 @@
 - `tests/live.spec.ts` spawns the real `foundry` binary, drives the app over http, asserts a live session (this Claude session, WORKING/inferred in SPORTS LAB), marquee == `/state` pipeline fields, then kills the watcher and asserts DOWN within ~10s with no solid WORKING station. `scripts/dev.sh` = one command to run it for real. Playwright 25 → **27**.
 - Screenshots: `app/screenshots/live-floor.png` (real watcher output), `live-down.png`.
 - Sonnet worker ~188k tokens (paused once waiting on a background test run; resumed).
+
+## 2026-09-05T03:20Z — close-out
+
+- CI #16/#17 red on two test assumptions, both fixed: the live test required ≥1 station but CI runners have no `claude` CLI (the empty estate IS the truth — test now asserts mirror == /state exactly); the ambient-drift test read the attribute before the first frame on a slow runner (now waits). CI green on 611e2e9.
+- Queue exhausted except Brey-blocked rows. Handoff in WEEKEND_HANDOFF.md. Stopping autonomous work: every remaining task needs Brey (rename/private, gh on PC, PR #2 merge, routine creation) or a real GPU/Windows machine (Tauri packaging, fps measurement).
