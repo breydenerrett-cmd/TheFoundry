@@ -40,3 +40,9 @@
 - Tests 58 → **64**; clippy/fmt clean. New dep: `toml`.
 - Known gap unchanged: the remote fixture carries no repo URL, so remote sessions are UNRESOLVED until the refresh snapshot includes `sources[].git_repository.url`.
 - Sonnet worker ~113k tokens. Next: S-01 persistence; H-01 running in parallel (separate repo worktree).
+
+## 2026-09-04T22:15Z — H-01 sports heartbeats (code complete, merge needs Brey)
+
+- Added `scripts/foundry_beat.sh` / `.py` + one-line beats in forward_capture, daily_loop, monitor_remote, test_parallel on a new branch off the live sports branch; draft PR https://github.com/breydenerrett-cmd/aisportsanalysis/pull/2. Helper is fail-safe (subshell, `|| true`, `set -u` safe), writes only fixed reasons / HTTP classes / pass counts. Verified with bash -n, py_compile, JSON validation, and a Foundry read of the emitted file.
+- Not merged autonomously: the base branch has routines and workers executing against it; merging is a safe-boundary decision for Brey. Real-event proof therefore pending → BLOCKED_HUMAN.
+- Sonnet worker ~98k tokens. S-01 persistence worker running.
