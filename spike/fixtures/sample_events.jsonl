@@ -1,0 +1,3 @@
+{"ts":"2026-09-04T00:00:00Z","type":"session_started","session_id":"session_abc123","kind":"local_interactive"}
+{"ts":"2026-09-04T00:00:05Z","type":"tool_call","session_id":"session_abc123","tool":"Bash","status":"ok"}
+{"ts":"2026-09-04T00:00:12Z","type":"agent_spawned","session_id":"session_abc123","agent_id":"agent_001"}

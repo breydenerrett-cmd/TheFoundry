@@ -1,0 +1,42 @@
+{
+  "probe_objective": "Determine whether a per-session event stream capability exists in the Claude Code Remote MCP API (per §7 design doc, which references 'a list_events capability')",
+  "probe_method": "ToolSearch with keyword queries including 'event', 'stream', 'list_events', with scope limited to deferred Claude_Code_Remote tools",
+  "probe_date": "2026-09-04",
+  "result": "NOT_FOUND",
+  "searches_performed": [
+    {
+      "query": "+Claude_Code_Remote event stream list",
+      "result": "No matching deferred tools found"
+    }
+  ],
+  "deferred_tools_available": [
+    "mcp__Claude_Code_Remote__list_sessions",
+    "mcp__Claude_Code_Remote__get_session",
+    "mcp__Claude_Code_Remote__list_triggers",
+    "mcp__Claude_Code_Remote__list_environments",
+    "mcp__Claude_Code_Remote__list_repos",
+    "mcp__Claude_Code_Remote__create_session",
+    "mcp__Claude_Code_Remote__get_session",
+    "mcp__Claude_Code_Remote__interrupt_session",
+    "mcp__Claude_Code_Remote__archive_session",
+    "mcp__Claude_Code_Remote__unarchive_session",
+    "mcp__Claude_Code_Remote__set_session_title",
+    "mcp__Claude_Code_Remote__set_session_tags",
+    "mcp__Claude_Code_Remote__subscribe_pr_activity",
+    "mcp__Claude_Code_Remote__unsubscribe_pr_activity",
+    "mcp__Claude_Code_Remote__watch_url",
+    "mcp__Claude_Code_Remote__unwatch_url",
+    "mcp__Claude_Code_Remote__create_trigger",
+    "mcp__Claude_Code_Remote__update_trigger",
+    "mcp__Claude_Code_Remote__delete_trigger",
+    "mcp__Claude_Code_Remote__fire_trigger",
+    "mcp__Claude_Code_Remote__send_later",
+    "mcp__Claude_Code_Remote__register_repo_root"
+  ],
+  "no_event_tools_found": true,
+  "implication_for_phase_1": {
+    "status": "REQUIRES_SPIKE",
+    "note": "Design doc §7 (line 218-219) anticipated needing to spike whether list_events exists for cloud sessions. Probe result: no list_events or similar event-stream tool is currently exposed in the deferred tools list. This likely means: (a) the capability may exist but is not yet wired into the MCP surface, or (b) it was planned but not yet implemented, or (c) events are accessed via a different mechanism (not yet discovered). Further investigation required at Phase 2 or later, but V1 does not depend on it — coarse telemetry via list_sessions is sufficient.",
+    "fallback": "§7 already planned for coarse fidelity on cloud sessions if granular events are unavailable. Tool-stroke animation will render as inferred (ghosted per §5) for cloud sessions. Local sessions get fine-grained events from ~/.claude JSONL (Phase 2+)."
+  }
+}

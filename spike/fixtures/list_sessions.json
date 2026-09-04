@@ -1,0 +1,78 @@
+{
+  "total_sessions": 20,
+  "sample_note": "This is a redacted subset of list_sessions output. Full data has 20+ sessions spanning cloud (anthropic_cloud) and bridge (bridge) environments.",
+  "data": [
+    {
+      "id": "session_018UzdnsXzQ7ZvGf5SehHwH8",
+      "title": "Claude ops room dashboard design",
+      "session_status": "SESSION_STATUS_IDLE",
+      "created_at": "2026-09-04T06:28:00.404258Z",
+      "updated_at": "2026-09-04T06:55:52.276519Z",
+      "environment_id": "env_01K1MUX5D39f5gi1XbUxzgrs",
+      "environment_kind": "anthropic_cloud",
+      "origin": "desktop_app",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-opus-5",
+      "post_turn_summary": {
+        "status_category": "review_ready",
+        "status_detail": "Phase 1 spike: Haiku probe + 2 Sonnet runtimes (Rust vs Bun/Node) running in parallel"
+      }
+    },
+    {
+      "id": "session_01C7LBsiA6Ax1ZLm2zSTDADS",
+      "title": "Autonomous AI lead-generation engine",
+      "session_status": "SESSION_STATUS_RUNNING",
+      "created_at": "2026-09-02T19:39:11.729909Z",
+      "updated_at": "2026-09-04T06:56:03.269178Z",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_WORKING",
+      "configured_model": "claude-fable-5-1",
+      "tags": ["remote-control-auto"]
+    },
+    {
+      "id": "session_016rbAi9wWy6Jx9nd7MUJcvY",
+      "title": "Handoff review and questions",
+      "session_status": "SESSION_STATUS_IDLE",
+      "created_at": "2026-08-27T06:59:25.825018Z",
+      "updated_at": "2026-08-27T07:54:17.748775Z",
+      "environment_id": "env_01K1MUX5D39f5gi1XbUxzgrs",
+      "environment_kind": "anthropic_cloud",
+      "origin": "desktop_app",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_BLOCKED",
+      "configured_model": "claude-sonnet-5",
+      "post_turn_summary": {
+        "status_category": "need_input",
+        "status_detail": "PDF/PNG export path clarified; awaiting user config choice",
+        "needs_action": "clarify: does Jacob need a printable file or digital link to share?"
+      }
+    },
+    {
+      "id": "session_01MWtbTddnBBRQztaoKQh5rG",
+      "title": "Claude workspace audit and reorganization plan",
+      "session_status": "SESSION_STATUS_IDLE",
+      "created_at": "2026-09-03T17:59:28.775237Z",
+      "updated_at": "2026-09-04T01:22:09.719321Z",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-opus-5",
+      "tags": ["remote-control-sdk"],
+      "last_init_error": {
+        "error_kind": "computer_unreachable",
+        "recoverable": true
+      }
+    }
+  ],
+  "key_observations": [
+    "Cloud sessions: 2 (environment_kind: anthropic_cloud)",
+    "Bridge sessions: 2 (environment_kind: bridge)",
+    "Status buckets observed: WORKING, REVIEW_READY, BLOCKED",
+    "Connection statuses: connected, disconnected, computer_unreachable",
+    "Models: claude-opus-5, claude-sonnet-5, claude-fable-5-1"
+  ]
+}

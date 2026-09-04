@@ -1,0 +1,14 @@
+{
+  "total_environments": 1,
+  "environments": [
+    {
+      "environment_id": "env_01K1MUX5D39f5gi1XbUxzgrs",
+      "name": "PC",
+      "description": "",
+      "state": "active",
+      "kind": "anthropic_cloud",
+      "created_at": "2026-08-18T21:53:54.360974Z"
+    }
+  ],
+  "observation": "This account has only one active environment (cloud). Bridge sessions are associated with remote machines (origin: claude_code_cli, tags: remote-control-sdk) but do not appear as separate environment entries in list_environments. Bridge sessions have environment_kind=bridge but no explicit environment_id."
+}

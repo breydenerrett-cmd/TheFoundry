@@ -1,0 +1,22 @@
+[package]
+name = "foundry_core"
+version = "0.1.0"
+edition = "2021"
+description = "THE FOUNDRY watcher/state core: normalized events, observers, redactor, reducer, text renderer. Phase 2/3 scope only — no UI, no Pixi."
+
+[[bin]]
+name = "foundry"
+path = "src/main.rs"
+
+[lib]
+name = "foundry_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"

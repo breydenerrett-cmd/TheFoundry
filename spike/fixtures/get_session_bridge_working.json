@@ -1,0 +1,39 @@
+{
+  "session_id": "session_01C7LBsiA6Ax1ZLm2zSTDADS",
+  "title": "Autonomous AI lead-generation engine",
+  "session_status": "SESSION_STATUS_RUNNING",
+  "created_at": "2026-09-02T19:39:11.729909Z",
+  "updated_at": "2026-09-04T06:56:03.269178Z",
+  "environment_kind": "bridge",
+  "origin": "claude_code_cli",
+  "connection_status": "connected",
+  "status_bucket": "SESSION_STATUS_BUCKET_WORKING",
+  "configured_model": "claude-fable-5-1",
+  "session_context": {
+    "model": "claude-fable-5-1",
+    "effort_level": "high"
+  },
+  "external_metadata": {
+    "container_cc_version": "2.1.258",
+    "effort_level": "high",
+    "flag_settings": {
+      "effortLevel": "xhigh"
+    },
+    "rate_limit_info": {
+      "isUsingOverage": false,
+      "rateLimitType": "seven_day",
+      "resetsAt": 1788732000,
+      "status": "allowed_warning"
+    }
+  },
+  "tags": ["remote-control-auto"],
+  "key_fields_present": [
+    "session_status: SESSION_STATUS_RUNNING",
+    "connection_status: connected",
+    "configured_model: claude-fable-5-1",
+    "status_bucket: SESSION_STATUS_BUCKET_WORKING",
+    "environment_kind: bridge",
+    "rate_limit_info"
+  ],
+  "observation": "Bridge session in RUNNING state (orchestrator/Fable model). No context_usage field (bridge sessions may not provide this). rate_limit_info present."
+}

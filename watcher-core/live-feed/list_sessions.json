@@ -1,0 +1,389 @@
+{
+  "data": [
+    {
+      "id": "session_018UzdnsXzQ7ZvGf5SehHwH8",
+      "title": "Claude ops room dashboard design",
+      "environment_kind": "anthropic_cloud",
+      "origin": "desktop_app",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_WORKING",
+      "configured_model": "claude-opus-5",
+      "created_at": "2026-09-04T06:28:00.404258Z",
+      "updated_at": "2026-09-04T07:12:23.575431Z",
+      "tags": [],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      },
+      "external_metadata": {
+        "last_served_model": "claude-sonnet-5"
+      },
+      "post_turn_summary": {
+        "status_category": null,
+        "status_detail": "Phase 2 Rust core built (23/23 tests pass); wiring live data feeds",
+        "needs_action": null
+      }
+    },
+    {
+      "id": "session_01MWtbTddnBBRQztaoKQh5rG",
+      "title": "Claude workspace audit and reorganization plan",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-opus-5",
+      "created_at": "2026-09-03T17:59:28.775237Z",
+      "updated_at": "2026-09-04T01:22:09.719321Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-opus-5"
+      },
+      "last_init_error": {
+        "error_kind": "computer_unreachable",
+        "recoverable": true
+      }
+    },
+    {
+      "id": "session_01FZrS3Vy2mLDYoTcHECwcSW",
+      "title": "Parker Pureline Coatings",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-09-03T17:50:55.379334Z",
+      "updated_at": "2026-09-04T06:53:24.308023Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      }
+    },
+    {
+      "id": "session_01GuEHsBvFVX4oNgRVghPgLk",
+      "title": "Conversation review and context",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_COMPLETED",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-09-03T17:50:52.297426Z",
+      "updated_at": "2026-09-03T17:50:52.297426Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      }
+    },
+    {
+      "id": "session_01GE4j3eJeQx97F9ejY462Mn",
+      "title": "Odds API key recovery for MLB analyzer",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_COMPLETED",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-09-02T23:51:49.084131Z",
+      "updated_at": "2026-09-02T23:57:45.040262Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      }
+    },
+    {
+      "id": "session_01C7LBsiA6Ax1ZLm2zSTDADS",
+      "title": "Autonomous AI lead-generation engine",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-fable-5-1",
+      "created_at": "2026-09-02T19:39:11.729909Z",
+      "updated_at": "2026-09-04T06:59:49.042132Z",
+      "tags": [
+        "remote-control-auto"
+      ],
+      "session_context": {
+        "model": "claude-fable-5-1"
+      }
+    },
+    {
+      "id": "session_01YMUyaNqTMuaWtivJ3zdiPt",
+      "title": "SPORTSBETTING DESIGN SESSION",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-opus-5",
+      "created_at": "2026-09-02T01:23:42.123618Z",
+      "updated_at": "2026-09-02T01:30:13.017962Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-opus-5"
+      }
+    },
+    {
+      "id": "session_01FurnQBScU51a8n8L2iK9bp",
+      "title": "Linehound launch operations",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-opus-5",
+      "created_at": "2026-09-01T03:47:34.818014Z",
+      "updated_at": "2026-09-04T02:35:05.138619Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-opus-5"
+      }
+    },
+    {
+      "id": "session_019GxB3qLZZxaVEmHzKi7Z1b",
+      "title": "SPORTSBETTING DESIGN SESSION",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_COMPLETED",
+      "configured_model": "claude-opus-5",
+      "created_at": "2026-08-31T20:56:50.607184Z",
+      "updated_at": "2026-09-02T01:23:12.718089Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-opus-5"
+      }
+    },
+    {
+      "id": "session_01WfNcXYvNmqc469jDgSAx4c",
+      "title": "Cowork session migration",
+      "environment_kind": "anthropic_cloud",
+      "origin": "desktop_app",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-08-27T07:51:29.583096Z",
+      "updated_at": "2026-08-27T08:24:07.104606Z",
+      "tags": [],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      },
+      "external_metadata": {
+        "last_served_model": "claude-sonnet-5"
+      },
+      "post_turn_summary": {
+        "status_category": "review_ready",
+        "status_detail": "Cowork session migrated to repo; 3 docs committed",
+        "needs_action": null
+      }
+    },
+    {
+      "id": "session_016rbAi9wWy6Jx9nd7MUJcvY",
+      "title": "Handoff review and questions",
+      "environment_kind": "anthropic_cloud",
+      "origin": "desktop_app",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_BLOCKED",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-08-27T06:59:25.825018Z",
+      "updated_at": "2026-08-27T07:54:17.748775Z",
+      "tags": [],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      },
+      "external_metadata": {
+        "last_served_model": "claude-sonnet-5"
+      },
+      "post_turn_summary": {
+        "status_category": "need_input",
+        "status_detail": "PDF/PNG export path clarified; awaiting user config choice",
+        "needs_action": "clarify: does the client need a printable file or digital link to share?"
+      }
+    },
+    {
+      "id": "session_01BB6CEj23fhPMVV2gLhkqz4",
+      "title": "Parent Session",
+      "environment_kind": "anthropic_cloud",
+      "origin": "desktop_app",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_WORKING",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-08-27T06:34:02.848165Z",
+      "updated_at": "2026-09-04T07:12:21.315486Z",
+      "tags": [],
+      "session_context": {
+        "model": "claude-opus-5"
+      },
+      "external_metadata": {
+        "last_served_model": "claude-opus-5"
+      },
+      "post_turn_summary": {
+        "status_category": null,
+        "status_detail": "Running cd /home/user/aisportsanalysis echo \"=== CHECK 1: ...",
+        "needs_action": null
+      }
+    },
+    {
+      "id": "session_01SQ3g48LR88HzoxD95nQEWz",
+      "title": "West Coast vs East Coast Debate",
+      "environment_kind": "anthropic_cloud",
+      "origin": "desktop_app",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-opus-5",
+      "created_at": "2026-08-27T06:02:30.307396Z",
+      "updated_at": "2026-08-29T22:48:56.627466Z",
+      "tags": [],
+      "session_context": {
+        "model": "claude-opus-5"
+      },
+      "external_metadata": {
+        "last_served_model": "claude-opus-5"
+      },
+      "post_turn_summary": {
+        "status_category": "review_ready",
+        "status_detail": "iOS UI redesigned: killed monochrome, fixed hierarchy; 37/37 tests pass",
+        "needs_action": null
+      }
+    },
+    {
+      "id": "session_01YQrnSZieoZmCqY9NApog5g",
+      "title": "Claude AI business overnight kit",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-08-26T06:11:15.869045Z",
+      "updated_at": "2026-08-26T06:28:17.074694Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      },
+      "last_init_error": {
+        "error_kind": "computer_unreachable",
+        "recoverable": true
+      }
+    },
+    {
+      "id": "session_01NbvLfgxqqT9yVRpQB6S1K1",
+      "title": "Music production tutor project resume",
+      "environment_kind": "anthropic_cloud",
+      "origin": "desktop_app",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_BLOCKED",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-08-26T06:00:46.303250Z",
+      "updated_at": "2026-08-26T16:38:07.234042Z",
+      "tags": [],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      },
+      "external_metadata": {
+        "last_served_model": "claude-sonnet-5"
+      },
+      "post_turn_summary": {
+        "status_category": "need_input",
+        "status_detail": "#2-4 blocked by YouTube bot-check; need transcript or yt-dlp",
+        "needs_action": "paste YouTube transcript or run yt-dlp locally"
+      }
+    },
+    {
+      "id": "session_01FBDeVEvnp7e1Vv6rXqvY2z",
+      "title": "Music production tutor scaffold",
+      "environment_kind": "anthropic_cloud",
+      "origin": "desktop_app",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_BLOCKED",
+      "configured_model": "claude-opus-5",
+      "created_at": "2026-08-26T05:26:58.748274Z",
+      "updated_at": "2026-08-26T06:01:53.818054Z",
+      "tags": [],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      },
+      "external_metadata": {
+        "last_served_model": "claude-sonnet-5"
+      },
+      "post_turn_summary": {
+        "status_category": "need_input",
+        "status_detail": "YouTube egress blocked by network policy",
+        "needs_action": "change environment network policy or run ingestion elsewhere"
+      }
+    },
+    {
+      "id": "session_01RZ4v7ZPdHTWCV4UK6maNkB",
+      "title": "Conversation review and context",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_COMPLETED",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-08-20T21:13:28.633665Z",
+      "updated_at": "2026-08-20T21:24:25.787726Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      }
+    },
+    {
+      "id": "session_01BxcjYrCeEmvRnGKNh71rfR",
+      "title": "Conversation review and context",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_COMPLETED",
+      "configured_model": "claude-sonnet-5",
+      "created_at": "2026-08-20T21:13:25.585622Z",
+      "updated_at": "2026-08-20T21:13:25.585622Z",
+      "tags": [
+        "remote-control-sdk"
+      ],
+      "session_context": {
+        "model": "claude-sonnet-5"
+      }
+    },
+    {
+      "id": "session_019LpucP4mcVKfsFCH1wGPTK",
+      "title": "Dispatch background conversation",
+      "environment_kind": "bridge",
+      "origin": "desktop_app",
+      "connection_status": "disconnected",
+      "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY",
+      "configured_model": null,
+      "created_at": "2026-08-16T03:18:17.898276Z",
+      "updated_at": "2026-08-16T03:18:34.865658Z",
+      "tags": [
+        "config:cowork",
+        "cowork-dispatch-local"
+      ]
+    },
+    {
+      "id": "session_01AG8C6PXyErpndfu5otxFRb",
+      "title": "Conversation review and context",
+      "environment_kind": "bridge",
+      "origin": "claude_code_cli",
+      "connection_status": "connected",
+      "status_bucket": "SESSION_STATUS_BUCKET_COMPLETED",
+      "configured_model": "claude-opus-5",
+      "created_at": "2026-08-14T19:33:30.083884Z",
+      "updated_at": "2026-08-14T19:33:33.938848Z",
+      "tags": [
+        "remote-control-sdk"
+      ]
+    }
+  ]
+}

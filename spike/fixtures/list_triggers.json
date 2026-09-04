@@ -1,0 +1,104 @@
+{
+  "total_triggers": 6,
+  "data": [
+    {
+      "id": "trig_01Q8gcr5qARLCY7Mv2tCCL3B",
+      "name": "Staging health monitor (hourly)",
+      "cron_expression": "48 * * * *",
+      "enabled": true,
+      "next_run_at": "2026-09-04T07:48:00Z",
+      "created_at": "2026-09-01T03:48:48.896865Z",
+      "updated_at": "2026-09-01T04:49:28.745480Z",
+      "persistent_session_id": "session_01BB6CEj23fhPMVV2gLhkqz4",
+      "persist_session": true,
+      "last_fired_at": "2026-09-04T06:48:39.789361Z",
+      "prompt_redacted": "Ops plane: run `bash scripts/monitor_remote.sh https://linehound-staging.fly.dev` (one Bash call...[REDACTED-LEN=200]",
+      "schedule_note": "Runs at :48 of every hour"
+    },
+    {
+      "id": "trig_01RGEtrGXUa9swzGvWxzDteL",
+      "name": "Autonomous build loop (roadmap queue)",
+      "cron_expression": "57 */4 * * *",
+      "enabled": true,
+      "next_run_at": "2026-09-04T08:57:00Z",
+      "created_at": "2026-08-30T04:57:07.125548Z",
+      "updated_at": "2026-09-02T19:13:46.185045Z",
+      "persistent_session_id": "session_01BB6CEj23fhPMVV2gLhkqz4",
+      "persist_session": true,
+      "last_fired_at": "2026-09-04T04:57:27.404739Z",
+      "prompt_redacted": "Autonomous build loop check-in for /home/user/aisportsanalysis (branch claude/sports-betting-analysis-review-g1o0co)...[REDACTED-LEN=1500]",
+      "schedule_note": "Runs at :57 of every 4th hour"
+    },
+    {
+      "id": "trig_016uRqogxtFdQZSs67DJRada",
+      "name": "Forward capture: watch + dense grid (hourly)",
+      "cron_expression": "15 * * * *",
+      "enabled": true,
+      "next_run_at": "2026-09-04T07:15:00Z",
+      "created_at": "2026-08-30T04:15:09.579258Z",
+      "updated_at": "2026-08-31T14:01:27.728615Z",
+      "persistent_session_id": "session_01BB6CEj23fhPMVV2gLhkqz4",
+      "persist_session": true,
+      "last_fired_at": "2026-09-04T06:21:16.506745Z",
+      "prompt_redacted": "Data plane: run `bash scripts/forward_capture.sh` (one Bash call). The script polls, captures, commits...[REDACTED-LEN=220]",
+      "schedule_note": "Runs at :15 of every hour"
+    },
+    {
+      "id": "trig_018CvX9sYTkhKMFq1LeMCBLF",
+      "name": "Daily loop check-in",
+      "cron_expression": "0 10 * * *",
+      "enabled": true,
+      "next_run_at": "2026-09-04T10:05:22Z",
+      "created_at": "2026-08-29T10:03:41.667668Z",
+      "updated_at": "2026-08-31T14:01:30.094781Z",
+      "persistent_session_id": "session_01BB6CEj23fhPMVV2gLhkqz4",
+      "persist_session": true,
+      "last_fired_at": "2026-09-03T10:07:19.462976Z",
+      "prompt_redacted": "Data plane: run `bash scripts/daily_loop.sh` (one Bash call). The script runs the full daily loop...[REDACTED-LEN=250]",
+      "schedule_note": "Daily at 10:00 UTC"
+    },
+    {
+      "id": "trig_01EmVC83eGVMrF35GAXdWCP9",
+      "name": "Youtube tutorial harvester",
+      "cron_expression": "0 10 * * *",
+      "enabled": false,
+      "next_run_at": "2026-08-29T10:05:41Z",
+      "created_at": "2026-08-28T17:52:46.875809Z",
+      "updated_at": "2026-08-28T17:52:52.780001Z",
+      "persist_session": false,
+      "prompt_redacted": "You are running a recurring pipeline: YouTube tutorial playlist → knowledge + skill drafts → revenue opportunities...[REDACTED-LEN=3500]",
+      "schedule_note": "Daily at 10:00 UTC (DISABLED)",
+      "mcp_connections": ["Google_Drive", "Gmail", "Claude_Code_Remote"]
+    },
+    {
+      "id": "trig_0157Zsan48oGAiTa5k2sbzb6",
+      "name": "Morning brief",
+      "cron_expression": "0 12 * * 1-5",
+      "enabled": false,
+      "next_run_at": "2026-09-02T12:06:51Z",
+      "created_at": "2026-08-26T04:28:02.408364Z",
+      "updated_at": "2026-09-01T18:44:17.521765Z",
+      "persist_session": false,
+      "last_fired_at": "2026-09-01T12:52:59.992612Z",
+      "prompt_redacted": "/morning Weekday morning brief. My role: Sales. Render the brief in English...[REDACTED-LEN=100]",
+      "schedule_note": "Weekdays at 12:00 UTC (DISABLED)",
+      "last_run_status": "ROUTINE_RUN_STATUS_SUCCEEDED"
+    }
+  ],
+  "summary": {
+    "enabled_triggers": 4,
+    "disabled_triggers": 2,
+    "persistent_session_triggers": 4,
+    "fresh_session_triggers": 2,
+    "all_persistent_bind_to": "session_01BB6CEj23fhPMVV2gLhkqz4"
+  },
+  "key_observations": [
+    "All enabled routines bind to the same persistent session (session_01BB6CEj23fhPMVV2gLhkqz4 - Parent Session)",
+    "Prompt bodies are redacted per §15 (never display raw routine prompts)",
+    "last_run outcome is present for fresh-session routines (e.g., Morning brief last succeeded)",
+    "Persistent-session routines have no last_run outcome (success must be inferred from bound session state)",
+    "next_run_at allows overdue detection",
+    "Cron expressions are precise (minute-level scheduling)",
+    "MCP connections listed where relevant (Youtube harvester has Google_Drive, Gmail, Claude_Code_Remote)"
+  ]
+}

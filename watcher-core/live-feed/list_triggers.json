@@ -1,0 +1,64 @@
+{
+  "data": [
+    {
+      "id": "trig_01Q8gcr5qARLCY7Mv2tCCL3B",
+      "name": "Staging health monitor (hourly)",
+      "cron_expression": "48 * * * *",
+      "enabled": true,
+      "next_run_at": "2026-09-04T07:48:00Z",
+      "last_fired_at": "2026-09-04T06:48:39.789361Z",
+      "persistent_session_id": "session_01BB6CEj23fhPMVV2gLhkqz4",
+      "prompt_redacted": "Ops plane: run `bash scripts/monitor_remote.sh https://linehound-staging.fly.dev` (one Bash call \u2014 the URL is a positional arg, not an env var). If it exits 0, end the turn silently. If it reports deg...[REDACTED-LEN=465]"
+    },
+    {
+      "id": "trig_01RGEtrGXUa9swzGvWxzDteL",
+      "name": "Autonomous build loop (roadmap queue)",
+      "cron_expression": "57 */4 * * *",
+      "enabled": true,
+      "next_run_at": "2026-09-04T08:57:00Z",
+      "last_fired_at": "2026-09-04T04:57:27.404739Z",
+      "persistent_session_id": "session_01BB6CEj23fhPMVV2gLhkqz4",
+      "prompt_redacted": "Autonomous build loop check-in for /home/user/aisportsanalysis (branch claude/sports-betting-analysis-review-g1o0co). IMPORTANT CONTEXT: an orchestration day is in progress......[REDACTED-LEN=175]"
+    },
+    {
+      "id": "trig_016uRqogxtFdQZSs67DJRada",
+      "name": "Forward capture: watch + dense grid (hourly)",
+      "cron_expression": "15 * * * *",
+      "enabled": true,
+      "next_run_at": "2026-09-04T07:15:00Z",
+      "last_fired_at": "2026-09-04T06:21:16.506745Z",
+      "persistent_session_id": "session_01BB6CEj23fhPMVV2gLhkqz4",
+      "prompt_redacted": "Data plane: run `bash scripts/forward_capture.sh` (one Bash call). The script polls, captures, commits, and pushes on its own. React ONLY to lines starting with \"ESCALATE:\"......[REDACTED-LEN=175]"
+    },
+    {
+      "id": "trig_018CvX9sYTkhKMFq1LeMCBLF",
+      "name": "Daily loop check-in",
+      "cron_expression": "0 10 * * *",
+      "enabled": true,
+      "next_run_at": "2026-09-04T10:05:22.725315107Z",
+      "last_fired_at": "2026-09-03T10:07:19.462976Z",
+      "persistent_session_id": "session_01BB6CEj23fhPMVV2gLhkqz4",
+      "prompt_redacted": "Data plane: run `bash scripts/daily_loop.sh` (one Bash call). The script runs the full daily loop, checks the ledger, commits, and pushes on its own......[REDACTED-LEN=151]"
+    },
+    {
+      "id": "trig_01EmVC83eGVMrF35GAXdWCP9",
+      "name": "Youtube tutorial harvester",
+      "cron_expression": "0 10 * * *",
+      "enabled": false,
+      "next_run_at": "2026-08-29T10:05:41.599372275Z",
+      "last_fired_at": null,
+      "persistent_session_id": null,
+      "prompt_redacted": "You are running a recurring pipeline: \"YouTube tutorial playlist -> knowledge + skill drafts -> revenue opportunities.\"......[REDACTED-LEN=122]"
+    },
+    {
+      "id": "trig_0157Zsan48oGAiTa5k2sbzb6",
+      "name": "Morning brief",
+      "cron_expression": "0 12 * * 1-5",
+      "enabled": false,
+      "next_run_at": "2026-09-02T12:06:51.081253831Z",
+      "last_fired_at": "2026-09-01T12:52:59.992612Z",
+      "persistent_session_id": null,
+      "prompt_redacted": "/morning\nWeekday morning brief. My role: Sales. Render the brief in English....[REDACTED-LEN=76]"
+    }
+  ]
+}
