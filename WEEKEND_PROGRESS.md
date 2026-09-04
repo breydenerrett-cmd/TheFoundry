@@ -67,3 +67,10 @@
 - Tests 74 → **88**; clippy/fmt clean; both binaries build.
 - CI: run #5 failed (`vite preview` bound to ::1 on Node 24 runners vs 127.0.0.1 baseURL) — fixed in 992687f by `--host 127.0.0.1`.
 - Sonnet worker ~181k tokens. V-02 worker running in `app/`.
+
+## 2026-09-04T23:50Z — V-02 three-second glance
+
+- Floor now reads at a glance: 20px marquee in the required order (`1 BREY REQUIRED — <station>` brightest amber), ambient luminance tracks WORKING/THINKING count, chunky isometric chassis with light pools and signage, spark/drift/plume particles under a global budget, ghost-outline motion for inferred fidelity and none for unknown, BREY/FAILED/HUNG beacons, HUNG elapsed counter, STALE "LAST SYNC" tag, Opus violet chamber + `N OPUS`. Idle and blind fixtures prove: no overlay + dim ambient when genuinely idle and verified; overlay + UNVERIFIED when blind.
+- Playwright 4 → **8**. Screenshots: `floor-fixture.png`, `floor-idle.png`, `floor-blind.png`.
+- Honest critique (worker's and mine): still schematic — flat shading, no bloom/CRT texture, and the whole floor sits under-scaled in the upper-left ~50% of the viewport. V-03 must fit-to-viewport and add a surface-detail pass.
+- CI #6 green after the preview-host fix. Sonnet worker ~118k tokens. O-01 Opus review running.

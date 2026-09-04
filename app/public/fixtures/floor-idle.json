@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-09-04T18:00:00Z",
+  "sessions": [
+    { "id": "s-sports-idle", "bay": "SPORTS LAB", "state": "idle", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 40000, "label": "backtest ingest pipeline" },
+    { "id": "s-abc-idle", "bay": "AI BUSINESS COMPLEX", "state": "idle", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 22000, "label": "cold-outreach copy pass" },
+    { "id": "s-sf-idle", "bay": "SERVERFORGE", "state": "idle", "fidelity": "observed", "model": "claude-haiku-4.5", "model_current": "claude-haiku-4.5", "elapsed_secs": 18000, "label": "fivem restart pending" },
+    { "id": "s-music-idle", "bay": "MUSIC LAB", "state": "idle", "fidelity": "observed", "model": "claude-haiku-4.5", "model_current": "claude-haiku-4.5", "elapsed_secs": 12000, "label": "mix notes" },
+    { "id": "s-exp-idle", "bay": "EXPERIMENTS", "state": "idle", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 9000, "label": "spike prototype" },
+    { "id": "s-misc-idle", "bay": "PERSONAL/MISC", "state": "idle", "fidelity": "observed", "model": "claude-haiku-4.5", "model_current": "claude-haiku-4.5", "elapsed_secs": 30000, "label": "personal notes cleanup" }
+  ],
+  "routines": [
+    { "id": "r-heartbeat", "name": "heartbeat-poll", "bay": "SERVERFORGE", "enabled": true, "overdue": false, "next_run_at": "2026-09-04T18:30:00Z", "stale": false }
+  ],
+  "checks": [
+    { "id": "c-heartbeat-ok", "label": "heartbeat", "bay": "SERVERFORGE", "ok": true, "last_event_ts": "2026-09-04T17:59:40Z" }
+  ],
+  "observers": [
+    { "name": "remote_claude", "status": "healthy", "last_success_at": "2026-09-04T17:59:50Z", "last_error": null, "consecutive_failures": 0 },
+    { "name": "git", "status": "healthy", "last_success_at": "2026-09-04T17:59:00Z", "last_error": null, "consecutive_failures": 0 },
+    { "name": "heartbeat", "status": "healthy", "last_success_at": "2026-09-04T18:00:00Z", "last_error": null, "consecutive_failures": 0 },
+    { "name": "bridge", "status": "healthy", "last_success_at": "2026-09-04T18:00:00Z", "last_error": null, "consecutive_failures": 0 },
+    { "name": "synthetic_canary", "status": "healthy", "last_success_at": "2026-09-04T18:00:00Z", "last_error": null, "consecutive_failures": 0 }
+  ],
+  "pipeline": {
+    "verified": true,
+    "remote_estate": "live",
+    "last_sync_age_secs": 10,
+    "last_output_age_secs": 12000,
+    "next_routine": "heartbeat-poll"
+  },
+  "output_shelf": {
+    "SPORTS LAB": [],
+    "AI BUSINESS COMPLEX": [],
+    "SERVERFORGE": [],
+    "MUSIC LAB": [],
+    "EXPERIMENTS": [],
+    "PERSONAL/MISC": [],
+    "UNRESOLVED": []
+  }
+}

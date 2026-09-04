@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-09-04T18:00:00Z",
+  "sessions": [
+    { "id": "s-sports-stale", "bay": "SPORTS LAB", "state": "stale_unknown", "fidelity": "unknown", "model": "claude-sonnet-5", "model_current": null, "elapsed_secs": 9000, "label": "backtest ingest pipeline — observer down", "restored": true },
+    { "id": "s-abc-stale", "bay": "AI BUSINESS COMPLEX", "state": "stale_unknown", "fidelity": "unknown", "model": "claude-opus-4.5", "model_current": null, "elapsed_secs": 9000, "label": "cold-outreach copy pass — observer down", "restored": true },
+    { "id": "s-sf-stale", "bay": "SERVERFORGE", "state": "stale_unknown", "fidelity": "unknown", "model": "claude-sonnet-5", "model_current": null, "elapsed_secs": 9000, "label": "fivem restart pending — observer down", "restored": true }
+  ],
+  "routines": [
+    { "id": "r-heartbeat", "name": "heartbeat-poll", "bay": "SERVERFORGE", "enabled": true, "overdue": true, "next_run_at": "2026-09-04T02:00:00Z", "stale": true }
+  ],
+  "checks": [
+    { "id": "c-heartbeat-degraded", "label": "heartbeat", "bay": "SERVERFORGE", "ok": null, "last_event_ts": "2026-09-04T10:00:00Z" }
+  ],
+  "observers": [
+    { "name": "remote_claude", "status": "down", "last_success_at": "2026-09-04T10:00:00Z", "last_error": "connection refused", "consecutive_failures": 40 },
+    { "name": "git", "status": "down", "last_success_at": "2026-09-04T10:00:00Z", "last_error": "connection refused", "consecutive_failures": 40 },
+    { "name": "heartbeat", "status": "down", "last_success_at": "2026-09-04T10:00:00Z", "last_error": "connection refused", "consecutive_failures": 40 },
+    { "name": "bridge", "status": "down", "last_success_at": "2026-09-04T10:00:00Z", "last_error": "connection refused", "consecutive_failures": 40 },
+    { "name": "synthetic_canary", "status": "down", "last_success_at": "2026-09-04T10:00:00Z", "last_error": "connection refused", "consecutive_failures": 40 }
+  ],
+  "pipeline": {
+    "verified": false,
+    "remote_estate": "not_running",
+    "last_sync_age_secs": 28800,
+    "last_output_age_secs": null,
+    "next_routine": null
+  },
+  "output_shelf": {
+    "SPORTS LAB": [],
+    "AI BUSINESS COMPLEX": [],
+    "SERVERFORGE": [],
+    "MUSIC LAB": [],
+    "EXPERIMENTS": [],
+    "PERSONAL/MISC": [],
+    "UNRESOLVED": []
+  }
+}

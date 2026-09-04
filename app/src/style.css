@@ -53,10 +53,13 @@ body {
 
 .marquee {
   flex: 0 0 auto;
+  height: 76px;
+  overflow: hidden;
   border-bottom: 1px solid #232b38;
   background: linear-gradient(180deg, #10141b 0%, #0c0f14 100%);
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: 20px;
+  font-weight: 700;
   letter-spacing: 0.5px;
   z-index: 5;
 }
@@ -68,6 +71,11 @@ body {
   padding: 2px 0;
 }
 
+.marquee-status {
+  font-size: 12px;
+  font-weight: 400;
+}
+
 .marquee-brey {
   color: var(--amber-bright);
   font-weight: 700;
@@ -75,7 +83,22 @@ body {
 }
 
 .marquee-count {
-  color: var(--text-dim);
+  color: var(--text);
+}
+
+.marquee-dim {
+  color: var(--text-dim) !important;
+  font-weight: 400 !important;
+  text-shadow: none !important;
+}
+
+.marquee-attention {
+  color: var(--amber-bright);
+  text-shadow: 0 0 6px rgba(255, 207, 92, 0.4);
+}
+
+.marquee-bright {
+  color: var(--text);
 }
 
 .marquee-status span {

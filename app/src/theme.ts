@@ -43,6 +43,12 @@ export const STATE_COLOR: Record<string, number> = {
   fading_ended: COLORS.gray,
 };
 
+// Ambient floor-wash colors — warm/lit when WORKING+THINKING is high, a cool
+// dim breathing wash when the floor is mostly idle. See computeAmbient() in
+// floor.ts (the #1 glance signal — brightness == health).
+export const AMBIENT_LIT = 0xffb46a;
+export const AMBIENT_DIM = 0x141a24;
+
 export const STATE_LABEL: Record<string, string> = {
   working: "WORKING",
   thinking: "THINKING",

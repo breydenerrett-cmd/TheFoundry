@@ -126,6 +126,12 @@ export interface PipelineSummary {
   next_routine: string | null;
 }
 
+/** Opus-family model check — used for the "N OPUS" expense tell in the
+ *  marquee and the violet specialist-chamber treatment on the floor. */
+export function isOpusModel(model: string | null | undefined): boolean {
+  return !!model && /opus/i.test(model);
+}
+
 /** Top-level fixture / live-feed document shape. */
 export interface FloorState {
   generated_at: string;
