@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import fixture from "../public/fixtures/floor.json" with { type: "json" };
 import idleFixture from "../public/fixtures/floor-idle.json" with { type: "json" };
 import blindFixture from "../public/fixtures/floor-blind.json" with { type: "json" };
+import statesFixture from "../public/fixtures/floor-states.json" with { type: "json" };
+import { STATE_TABLE, motionFor, beaconFor } from "../src/states";
 
 test("every fixture session appears with its state token", async ({ page }) => {
   await page.goto("/");
@@ -111,6 +113,75 @@ test("idle fixture: no blind overlay, lower ambient", async ({ page }) => {
 
   await page.waitForTimeout(300);
   await page.screenshot({ path: "screenshots/floor-idle.png", fullPage: false });
+});
+
+test("state-mapping table: scene-mirror matches src/states.ts for every state x fidelity", async ({
+  page,
+}) => {
+  await page.goto("/?fixture=floor-states.json");
+  const mirror = page.locator("#scene-mirror");
+  await expect(mirror.locator("div")).toHaveCount(statesFixture.sessions.length);
+
+  for (const session of statesFixture.sessions) {
+    const row = page.locator(`#scene-mirror div[data-station-id="${session.id}"]`);
+    const expectedMotion = motionFor(
+      session.state as keyof typeof STATE_TABLE,
+      session.fidelity as "observed" | "inferred" | "unknown",
+      (session as { restored?: boolean }).restored
+    );
+    const expectedBeacon = beaconFor(
+      session.state as keyof typeof STATE_TABLE,
+      (session as { restored?: boolean }).restored
+    );
+    await expect(row).toHaveAttribute("data-state", session.state);
+    await expect(row).toHaveAttribute("data-fidelity", session.fidelity);
+    await expect(row).toHaveAttribute("data-motion", expectedMotion);
+    await expect(row).toHaveAttribute("data-beacon", expectedBeacon);
+    if ((session as { restored?: boolean }).restored) {
+      await expect(row).toHaveAttribute("data-restored", "true");
+    }
+  }
+
+  // The 13 core states are all covered at observed fidelity.
+  const observedStates = new Set(
+    statesFixture.sessions.filter((s) => s.fidelity === "observed" && !("restored" in s)).map((s) => s.state)
+  );
+  for (const state of Object.keys(STATE_TABLE)) {
+    expect(observedStates.has(state)).toBe(true);
+  }
+
+  // The restored WORKING record must never be trusted — it renders with no
+  // motion (STALE treatment), regardless of its nominal `working` state.
+  const restored = statesFixture.sessions.find((s) => (s as { restored?: boolean }).restored)!;
+  const restoredRow = page.locator(`#scene-mirror div[data-station-id="${restored.id}"]`);
+  await expect(restoredRow).toHaveAttribute("data-motion", "none");
+
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: "screenshots/floor-states.png", fullPage: false });
+});
+
+test("layout: scene bounds fill most of the viewport at 1280x720 and 1920x1080", async ({
+  page,
+}) => {
+  for (const [width, height] of [
+    [1280, 720],
+    [1920, 1080],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await page.goto("/");
+    await page.waitForTimeout(300);
+
+    const host = page.locator(".floor-host");
+    const boundsAttr = await host.getAttribute("data-scene-bounds");
+    expect(boundsAttr).toBeTruthy();
+    const [, , w, h] = boundsAttr!.split(",").map(Number);
+
+    const hostBox = await host.boundingBox();
+    expect(hostBox).toBeTruthy();
+
+    expect(w).toBeGreaterThanOrEqual(hostBox!.width * 0.8);
+    expect(h).toBeGreaterThanOrEqual(hostBox!.height * 0.7);
+  }
 });
 
 test("blind fixture: overlay + PIPELINE: UNVERIFIED", async ({ page }) => {

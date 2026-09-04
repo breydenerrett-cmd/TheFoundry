@@ -2,16 +2,25 @@
 // Pure rendering module: takes a FloorState snapshot and draws it. No network,
 // no state mutation beyond Pixi's own scene graph. See feed.ts for data.
 
-import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
+import { Application, BlurFilter, Container, Graphics, Text, TextStyle } from "pixi.js";
 import type { BayName, Fidelity, FloorState, SessionRecord, StationState } from "./state";
 import { BAYS, isOpusModel } from "./state";
 import { AMBIENT_DIM, AMBIENT_LIT, COLORS, FONT_STACK, STATE_LABEL } from "./theme";
+import { STATE_TABLE, beaconFor, effectiveState, motionFor as motionForTable } from "./states";
+
+/** Minimum effective (post-scale) font size, per V-03 §1 legibility rule. */
+const MIN_EFFECTIVE_FONT = 11;
 
 const TILE_W = 220;
 const TILE_H = 110;
 // Grid spacing is wider than the platform diamond itself so adjacent bays'
 // signage, stations and output shelves have breathing room.
-const GRID_W = TILE_W * 1.7;
+// Horizontal spacing is wider relative to vertical than the tile's own 2:1
+// diamond ratio so the 3x3-ish bay grid reads as a wide isometric deck that
+// naturally fills a 16:9-ish viewport (see the fit-to-viewport comment on
+// `layout()` — this ratio, not the layout shape, determines the content's
+// aspect since both axes scale with the same col+row extent).
+const GRID_W = TILE_W * 3.0;
 const GRID_H = TILE_H * 2.6;
 
 // Chassis footprint — ~3x the V-01 primitive size (was radius 7-9).
@@ -22,16 +31,17 @@ const ST_LIFT = 22; // extrusion height of the prism walls
 const MOTION_STATES: ReadonlySet<StationState> = new Set(["working", "thinking", "specialist"]);
 const PARTICLE_BUDGET = 400;
 
-// Simple 4x2 grid layout for the 7 bays (6 real + UNRESOLVED), projected
-// isometrically so the floor reads as a raised industrial deck.
+// 3x3-ish isometric grid for the 7 bays (6 real + UNRESOLVED) so the
+// composition reads as a balanced deck rather than a diagonal staircase.
+// UNRESOLVED sits centered on its own row, dimmer, at the back.
 const BAY_GRID: Record<BayName, { col: number; row: number }> = {
   "SPORTS LAB": { col: 0, row: 0 },
   "AI BUSINESS COMPLEX": { col: 1, row: 0 },
   SERVERFORGE: { col: 2, row: 0 },
-  "MUSIC LAB": { col: 3, row: 0 },
-  EXPERIMENTS: { col: 0, row: 1 },
-  "PERSONAL/MISC": { col: 1, row: 1 },
-  UNRESOLVED: { col: 2, row: 1 },
+  "MUSIC LAB": { col: 0, row: 1 },
+  EXPERIMENTS: { col: 1, row: 1 },
+  "PERSONAL/MISC": { col: 2, row: 1 },
+  UNRESOLVED: { col: 1, row: 2 },
 };
 
 function isoProject(col: number, row: number): { x: number; y: number } {
@@ -90,10 +100,12 @@ function dashedDiamond(g: Graphics, w: number, h: number, color: number, alpha =
  *  observed WORKING/THINKING/SPECIALIST, `ghost` for the same states at
  *  `inferred` fidelity (dashed ghost outline, 50% alpha, never solid),
  *  `none` for everything else including all `unknown` fidelity. */
-export function motionFor(state: StationState, fidelity: Fidelity): "solid" | "ghost" | "none" {
-  if (fidelity === "unknown") return "none";
-  if (!MOTION_STATES.has(state)) return "none";
-  return fidelity === "observed" ? "solid" : "ghost";
+export function motionFor(
+  state: StationState,
+  fidelity: Fidelity,
+  restored?: boolean
+): "solid" | "ghost" | "none" {
+  return motionForTable(state, fidelity, restored);
 }
 
 /** Ambient luminance = health: 0..1 derived from the fraction of sessions
@@ -165,17 +177,39 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         Math.min(40, Math.floor(PARTICLE_BUDGET / Math.max(1, activeCount)))
       );
 
+      // Text nodes created during layout, tracked so their font size can be
+      // bumped back up to MIN_EFFECTIVE_FONT post-scale-down (V-03 §1: keep
+      // text legible at min 11px *effective*, i.e. after `world.scale`).
+      let scaledTexts: { text: Text; base: number }[] = [];
+      function trackText(text: Text, base: number): Text {
+        scaledTexts.push({ text, base });
+        return text;
+      }
+
+      /** Fit-to-viewport: lay out the scene at scale 1 with no translation,
+       *  measure its bounding box, then scale+center it to fill ~92% of the
+       *  screen area (the canvas host already excludes the marquee via flex
+       *  layout, so "available area" is simply app.screen). Runs on every
+       *  resize. Exposes `data-scene-bounds="x,y,w,h"` in screen space. */
       function layout(): void {
         world.removeChildren();
-        const { width } = app.screen;
-        world.x = width / 2;
-        world.y = 90;
-        const scale = Math.min(1, width / 2000);
-        world.scale.set(Math.max(0.5, scale));
+        world.scale.set(1);
+        world.x = 0;
+        world.y = 0;
+        scaledTexts = [];
+        stations.length = 0;
 
+        const { width, height } = app.screen;
         const shelfMap = state.output_shelf;
 
+        // The backdrop grid is drawn wide on purpose (a floor that extends
+        // past the visible bays) so it must NOT count toward the fit-to-
+        // viewport bounding box below — only `content` (the actual bays)
+        // does. Otherwise the huge backdrop would make the real content
+        // shrink to a fraction of the screen, which was V-03's #1 defect.
         drawFloorGrid(world);
+        const content = new Container();
+        world.addChild(content);
 
         for (const bay of BAYS) {
           const grid = BAY_GRID[bay];
@@ -183,7 +217,7 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
           const bayContainer = new Container();
           bayContainer.x = p.x;
           bayContainer.y = p.y;
-          world.addChild(bayContainer);
+          content.addChild(bayContainer);
 
           drawBayPlatform(bayContainer, bay);
 
@@ -201,11 +235,39 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
 
           drawOutputShelf(bayContainer, shelfMap[bay] ?? []);
 
-          const brey = sessions.filter((s) => s.state === "brey_required");
-          const hasFault = sessions.some((s) => s.state === "failed" || s.state === "hung");
+          const effStates = sessions.map((s) => effectiveState(s.state, s.restored));
+          const brey = effStates.filter((s) => s === "brey_required");
+          const hasFault = effStates.some((s) => s === "failed" || s === "hung");
           if (brey.length > 0 || hasFault) {
             drawFaultBeacon(bayContainer, sessions);
           }
+        }
+
+        const bounds = content.getLocalBounds();
+        const availW = width * 0.92;
+        const availH = height * 0.92;
+        const fitScale =
+          bounds.width > 0 && bounds.height > 0
+            ? Math.max(0.05, Math.min(availW / bounds.width, availH / bounds.height))
+            : 1;
+        world.scale.set(fitScale);
+        world.x = width / 2 - (bounds.x + bounds.width / 2) * fitScale;
+        world.y = height / 2 - (bounds.y + bounds.height / 2) * fitScale;
+
+        const sceneX = bounds.x * fitScale + world.x;
+        const sceneY = bounds.y * fitScale + world.y;
+        canvasHost.dataset.sceneBounds = [
+          sceneX.toFixed(1),
+          sceneY.toFixed(1),
+          (bounds.width * fitScale).toFixed(1),
+          (bounds.height * fitScale).toFixed(1),
+        ].join(",");
+
+        // Keep chassis/text scaling with the scene, but never let text drop
+        // below MIN_EFFECTIVE_FONT px on screen.
+        for (const { text, base } of scaledTexts) {
+          const needed = MIN_EFFECTIVE_FONT / fitScale;
+          text.style.fontSize = Math.max(base, needed);
         }
       }
 
@@ -244,6 +306,23 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         g.stroke({ width: 2, color: edge, alpha: 0.9 });
         container.addChild(g);
 
+        // Inset floor-plate grid: a smaller diamond grid within the
+        // platform so bays read as detailed decking, not a flat fill.
+        const inset = new Graphics();
+        const insetSteps = 4;
+        inset.setStrokeStyle({ width: 1, color: edge, alpha: isUnresolved ? 0.15 : 0.28 });
+        for (let i = 1; i < insetSteps; i++) {
+          const t = i / insetSteps;
+          inset.moveTo(-w / 2 + (w / 2) * t, -h / 2 + h * (0.5 - 0.5 * (1 - t)));
+        }
+        // Simple lattice of two diamond-parallel line families.
+        for (let i = -insetSteps; i <= insetSteps; i++) {
+          const t = i / insetSteps;
+          inset.moveTo(t * (w / 2), t * (h / 2));
+          inset.lineTo(t * (w / 2) + (w / 2) * (1 - Math.abs(t)), t * (h / 2) - (h / 2) * (1 - Math.abs(t)));
+        }
+        container.addChild(inset);
+
         if (isUnresolved) {
           const hatch = new Graphics();
           hatch.poly([0, -h / 2, w / 2, 0, 0, h / 2, -w / 2, 0]);
@@ -272,19 +351,41 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         });
         label.anchor.set(0.5, 0.5);
         label.y = -h / 2 - 16;
-        container.addChild(label);
+        container.addChild(trackText(label, 11));
       }
 
       function buildStation(record: SessionRecord): StationSprite {
         const container = new Container();
+        // `restored` always forces STALE treatment — never trust a restored
+        // WORKING. All rendering below reads the effective state, not the
+        // raw nominal one, except the "(restored)" tag itself.
+        const eff = effectiveState(record.state, record.restored);
+        const spec = STATE_TABLE[eff];
 
+        // Furniture: small non-empty-diamond detail per bay so stations
+        // don't read as bare shapes — a conveyor stub feeding in and an
+        // output ledge line, drawn low, behind the chassis.
+        const furniture = new Graphics();
+        furniture.rect(-ST_W - 6, 4, 10, 3);
+        furniture.fill({ color: COLORS.bayEdge, alpha: 0.4 });
+        furniture.rect(ST_W - 4, 4, 10, 3);
+        furniture.fill({ color: COLORS.bayEdge, alpha: 0.4 });
+        container.addChild(furniture);
+
+        // Soft glow blur under the light pool — a separate low-cost layer,
+        // disabled under reduced-motion (no need to keep animating a static
+        // blurred blob when motion is off; it's still drawn once, just
+        // without the filter cost, per the reduced-motion budget note).
         const lightPool = new Graphics();
-        drawLightPool(lightPool, record);
+        drawLightPool(lightPool, eff, spec);
+        if (!reducedMotion) {
+          lightPool.filters = [new BlurFilter({ strength: 6, quality: 2 })];
+        }
         container.addChild(lightPool);
 
         const chassis = new Graphics();
         container.addChild(chassis);
-        drawChassis(chassis, record);
+        drawChassis(chassis, record, eff, spec);
 
         const particleLayer = new Graphics();
         container.addChild(particleLayer);
@@ -294,36 +395,37 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         drawFidelityOverlay(fidelityOverlay, record);
 
         let beacon: Graphics | null = null;
-        if (record.state === "brey_required") {
+        if (beaconFor(record.state, record.restored) !== "none") {
           beacon = new Graphics();
           container.addChild(beacon);
         }
 
         let label: Text | null = null;
-        if (record.state === "hung" || record.state === "stale_unknown") {
+        if (eff === "hung" || eff === "stale_unknown") {
+          const restoredTag = record.restored ? " (restored)" : "";
           label = new Text({
-            text: record.state === "hung" ? fmtElapsed(record.elapsed_secs) : "LAST SYNC —",
+            text: (eff === "hung" ? fmtElapsed(record.elapsed_secs) : "LAST SYNC —") + restoredTag,
             style: new TextStyle({
               fontFamily: FONT_STACK,
               fontSize: 9,
-              fill: record.state === "hung" ? COLORS.redOrange : COLORS.textDim,
+              fill: eff === "hung" ? COLORS.redOrange : COLORS.textDim,
               letterSpacing: 1,
             }),
           });
           label.anchor.set(0.5, 0);
           label.y = ST_LIFT + 8;
-          container.addChild(label);
+          container.addChild(trackText(label, 9));
         }
 
         // Signage plate under the chassis: wide-tracked uppercase state tag.
         const plate = new Graphics();
-        const plateColor = STATE_COLOR_LOCAL(record.state);
+        const plateColor = spec.color;
         plate.roundRect(-30, ST_LIFT + (label ? 20 : 6), 60, 12, 2);
         plate.fill({ color: 0x05070a, alpha: 0.8 });
         plate.stroke({ width: 1, color: plateColor, alpha: 0.6 });
         container.addChild(plate);
         const tag = new Text({
-          text: STATE_LABEL[record.state] ?? record.state.toUpperCase(),
+          text: (STATE_LABEL[eff] ?? spec.label) + (record.restored ? " (restored)" : ""),
           style: new TextStyle({
             fontFamily: FONT_STACK,
             fontSize: 7,
@@ -334,7 +436,7 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         tag.anchor.set(0.5, 0.5);
         tag.x = 0;
         tag.y = ST_LIFT + (label ? 26 : 12);
-        container.addChild(tag);
+        container.addChild(trackText(tag, 7));
 
         return {
           container,
@@ -349,8 +451,9 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         };
       }
 
-      function drawLightPool(g: Graphics, record: SessionRecord): void {
-        const color = STATE_COLOR_LOCAL(record.state);
+      function drawLightPool(g: Graphics, eff: StationState, spec: (typeof STATE_TABLE)[StationState]): void {
+        if (spec.lightMode === "off") return;
+        const color = spec.color;
         const rings = 3;
         for (let i = rings; i > 0; i--) {
           const r = (ST_W + 6) * (i / rings) * 1.4;
@@ -359,40 +462,53 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         }
       }
 
-      function drawChassis(g: Graphics, record: SessionRecord): void {
+      function drawChassis(
+        g: Graphics,
+        record: SessionRecord,
+        eff: StationState,
+        spec: (typeof STATE_TABLE)[StationState]
+      ): void {
         g.clear();
-        const color = STATE_COLOR_LOCAL(record.state);
-        const desaturated = record.state === "stale_unknown" || record.fidelity === "unknown";
-        const baseColor = desaturated ? COLORS.gray : color;
+        const desaturated = eff === "stale_unknown" || record.fidelity === "unknown";
+        const baseColor = desaturated ? COLORS.gray : spec.color;
         const w = ST_W;
         const h = ST_H;
         const lift = ST_LIFT;
-        const opus = isOpusModel(record.model_current ?? record.model) && record.state === "specialist";
+        const opus = isOpusModel(record.model_current ?? record.model) && eff === "specialist";
 
         // Bottom platform diamond (footprint).
         g.poly([0, 0, w, h / 2, 0, h, -w, h / 2]);
         g.fill({ color: 0x05070a, alpha: 0.7 });
         g.stroke({ width: 1, color: baseColor, alpha: 0.3 });
 
-        // Left wall (darker face).
+        // Gradient-shaded prism faces: lit top (roof), mid-tone left wall,
+        // dark right wall — a fixed light source from the upper-left.
+        // Left wall (mid face, faces the light).
         g.poly([-w, h / 2, 0, h, 0, h - lift, -w, h / 2 - lift]);
-        g.fill({ color: baseColor, alpha: 0.28 });
-        // Right wall (mid face).
+        g.fill({ color: baseColor, alpha: 0.5 });
+        // Right wall (dark face, away from the light).
         g.poly([w, h / 2, 0, h, 0, h - lift, w, h / 2 - lift]);
-        g.fill({ color: baseColor, alpha: 0.42 });
+        g.fill({ color: baseColor, alpha: 0.24 });
         // Back walls up to top diamond.
         g.poly([0, 0, w, h / 2, w, h / 2 - lift, 0, -lift]);
-        g.fill({ color: baseColor, alpha: 0.5 });
+        g.fill({ color: baseColor, alpha: 0.4 });
         g.poly([0, 0, -w, h / 2, -w, h / 2 - lift, 0, -lift]);
-        g.fill({ color: baseColor, alpha: 0.36 });
+        g.fill({ color: baseColor, alpha: 0.55 });
 
         // Top face (roof) — brightest, carries the state color.
         g.poly([0, -lift, w, h / 2 - lift, 0, h - lift, -w, h / 2 - lift]);
         g.fill({ color: baseColor, alpha: opus ? 0.85 : 0.95 });
         g.stroke({ width: 1.5, color: COLORS.white, alpha: 0.25 });
 
+        // Rim light: a bright thin highlight along the roof's lit (upper
+        // left) edge only, distinct from the all-around roof stroke above.
+        g.setStrokeStyle({ width: 1.5, color: COLORS.white, alpha: 0.55 });
+        g.moveTo(-w, h / 2 - lift);
+        g.lineTo(0, -lift);
+        g.stroke();
+
         // Specialist (opus) chamber walls: a violet enclosure ring.
-        if (record.state === "specialist") {
+        if (eff === "specialist") {
           g.setStrokeStyle({ width: 1.5, color: COLORS.violet, alpha: 0.7 });
           g.moveTo(-w * 0.6, h / 2 - lift * 1.35);
           g.lineTo(-w * 0.6, h / 2 - lift * 0.15);
@@ -403,10 +519,10 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
 
         // Non-color shape hint on the roof, colorblind-safe (matches V-01's
         // circle/square/diamond/triangle family per state).
-        drawShapeHint(g, record.state, h / 2 - lift);
+        drawShapeHint(g, eff, h / 2 - lift);
 
         // HUNG: a frozen billet stalled on a conveyor stub.
-        if (record.state === "hung") {
+        if (eff === "hung") {
           g.rect(-8, h / 2 - lift - 26, 16, 6);
           g.fill({ color: COLORS.gray, alpha: 0.8 });
           g.stroke({ width: 1, color: COLORS.redOrange, alpha: 0.9 });
@@ -529,9 +645,9 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
       }
 
       function drawFaultBeacon(container: Container, sessions: SessionRecord[]): void {
-        const brey = sessions.some((s) => s.state === "brey_required");
-        const failed = sessions.some((s) => s.state === "failed");
-        const hung = sessions.some((s) => s.state === "hung");
+        const brey = sessions.some((s) => effectiveState(s.state, s.restored) === "brey_required");
+        const failed = sessions.some((s) => effectiveState(s.state, s.restored) === "failed");
+        const hung = sessions.some((s) => effectiveState(s.state, s.restored) === "hung");
         const beacon = new Graphics();
         const height = brey ? 60 : failed ? 46 : 38;
         beacon.y = -TILE_H / 2 - height;
@@ -584,12 +700,30 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
           row.dataset.state = s.state;
           row.dataset.fidelity = s.fidelity;
           row.dataset.bay = s.bay;
-          row.dataset.motion = motionFor(s.state, s.fidelity);
-          row.textContent = `${s.id}|${s.state}|${s.fidelity}|${s.bay}|${row.dataset.motion}`;
+          row.dataset.motion = motionFor(s.state, s.fidelity, s.restored);
+          row.dataset.beacon = beaconFor(s.state, s.restored);
+          if (s.restored) row.dataset.restored = "true";
+          row.textContent = `${s.id}|${s.state}|${s.fidelity}|${s.bay}|${row.dataset.motion}|${row.dataset.beacon}`;
           mirror.appendChild(row);
         }
       }
       updateSceneMirror();
+
+      // Faint CRT scanline texture overlay — always present at low alpha,
+      // distinct from the amber blind-pipeline overlay above it in z-order.
+      const scanlines = new Graphics();
+      app.stage.addChild(scanlines);
+      function drawScanlines(): void {
+        scanlines.clear();
+        const { width, height } = app.screen;
+        scanlines.setStrokeStyle({ width: 1, color: COLORS.white, alpha: 0.05 });
+        for (let y = 0; y < height; y += 3) {
+          scanlines.moveTo(0, y);
+          scanlines.lineTo(width, y);
+        }
+        scanlines.stroke();
+      }
+      drawScanlines();
 
       function drawOverlay(): void {
         overlay.clear();
@@ -629,6 +763,7 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
       app.renderer.on("resize", () => {
         layout();
         drawOverlay();
+        drawScanlines();
         drawAmbientWash(performance.now() / 1000);
       });
 
@@ -646,8 +781,8 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         if (reducedMotion) return;
 
         for (const st of stations) {
-          const s = st.record.state;
-          const motion = motionFor(s, st.record.fidelity);
+          const s = effectiveState(st.record.state, st.record.restored);
+          const motion = motionFor(st.record.state, st.record.fidelity, st.record.restored);
 
           if (motion === "solid" || motion === "ghost") {
             const alpha = motion === "ghost" ? 0.5 : 1;
@@ -764,11 +899,4 @@ function fmtElapsed(secs: number): string {
   const ss = s % 60;
   const pad = (n: number) => String(n).padStart(2, "0");
   return hh > 0 ? `${hh}:${pad(mm)}:${pad(ss)}` : `${pad(mm)}:${pad(ss)}`;
-}
-
-// Re-exported locally to avoid a circular import loop with theme.ts's
-// STATE_COLOR table (kept here for clarity at each draw call site).
-import { STATE_COLOR } from "./theme";
-function STATE_COLOR_LOCAL(state: StationState): number {
-  return STATE_COLOR[state] ?? COLORS.gray;
 }

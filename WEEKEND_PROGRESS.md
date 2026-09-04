@@ -74,3 +74,9 @@
 - Playwright 4 → **8**. Screenshots: `floor-fixture.png`, `floor-idle.png`, `floor-blind.png`.
 - Honest critique (worker's and mine): still schematic — flat shading, no bloom/CRT texture, and the whole floor sits under-scaled in the upper-left ~50% of the viewport. V-03 must fit-to-viewport and add a surface-detail pass.
 - CI #6 green after the preview-host fix. Sonnet worker ~118k tokens. O-01 Opus review running.
+
+## 2026-09-05T00:25Z — V-03 station states + fit-to-viewport
+
+- `src/states.ts` is now the single state→{color, light, motion, glyph, beacon} table; `restored` forces STALE treatment regardless of state. Fit-to-viewport layout (content-only bounds, ~92% fill, tested at 1280×720 and 1920×1080 via `data-scene-bounds`), 3×3 bay grid, gradient/rim-light/scanline/furniture pass. `floor-states.json` fixture with all 13 states + inferred + restored. Playwright 8 → **10**.
+- Carry-over into V-04: label collisions at small stations; glyph drawing still uses the old switch, not `spec.glyph`.
+- Sonnet worker ~156k tokens. O-01 fixer running in watcher-core.

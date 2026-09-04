@@ -1,9 +1,11 @@
-# THE FOUNDRY — V-02 "3-second glance" (visual language)
+# THE FOUNDRY — V-03 "fill the screen, every state correct"
 
 Fixture-driven visual language for the floor: chunky isometric machine
-chassis, ambient-luminance-as-health, and beacon/marquee legibility, built on
-top of the V-01 substrate. Vite + React + TypeScript, PixiJS (v8) for the
-isometric floor, React only for the HUD chrome (marquee).
+chassis, ambient-luminance-as-health, beacon/marquee legibility, a
+fit-to-viewport isometric composition, and a single state-mapping table that
+every state renders through — built on top of the V-01/V-02 substrate. Vite +
+React + TypeScript, PixiJS (v8) for the isometric floor, React only for the
+HUD chrome (marquee).
 
 ## Run it
 
@@ -27,11 +29,23 @@ required or attempted in this environment (see "Tauri scaffold" below).
   `ObserverHealth`, and a `PipelineSummary` for the truth-gate fields
   (`verified`, `remote_estate`, `last_sync_age_secs`, `last_output_age_secs`,
   `next_routine`).
-- `public/fixtures/floor.json` — the only data source today. 14 sessions
-  across all six bays + UNRESOLVED, covering all 13 state values; 4 routines
-  (one overdue, one disabled, one stale); 3 checks; 5 observers (one
-  Degraded, one Down); a deliberately **unverified** pipeline so the blind
-  overlay is exercised by default.
+- `src/states.ts` — the V-03 state-mapping table. `STATE_TABLE` maps every
+  `StationState` to `{color, lightMode, motion, glyph, beacon, label}`; all
+  rendering in `src/floor.ts` reads through this table (or its
+  `motionFor()`/`beaconFor()`/`effectiveState()` helpers) rather than
+  switching on `state` inline. `effectiveState()` is where the
+  never-trust-a-restored-WORKING rule lives: a `restored` record always
+  renders as `stale_unknown` regardless of its nominal state.
+- `public/fixtures/floor.json` — the primary data source. 14 sessions across
+  all six bays + UNRESOLVED, covering all 13 state values; 4 routines (one
+  overdue, one disabled, one stale); 3 checks; 5 observers (one Degraded,
+  one Down); a deliberately **unverified** pipeline so the blind overlay is
+  exercised by default.
+- `public/fixtures/floor-states.json` — the state-mapping-table fixture. One
+  station per state at `observed` fidelity (13), plus one `inferred` WORKING
+  and one `restored` WORKING, so `tests/floor.spec.ts` can assert the
+  scene-mirror matches `src/states.ts` exactly for every state × fidelity
+  combination.
 - `src/feed.ts` — the loader. Reads `?fixture=<name>.json` from the URL query
   (sandboxed to `public/fixtures/`) or defaults to `floor.json`. This is the
   **only** file that will change when a live `/state` WebSocket or Tauri
@@ -108,13 +122,54 @@ station.
   computed from real fixture data and rendered, never silently omitted as a
   fabricated zero.
 
+## V-03 "fill the screen, every state correct"
+
+- **Fit-to-viewport layout.** `layout()` in `src/floor.ts` builds the whole
+  scene at scale 1 with no translation into a `content` container, measures
+  its bounding box with `content.getLocalBounds()`, then scales+centers
+  `world` so the content fills ~92% of the canvas area on every resize. The
+  backdrop floor grid is drawn *outside* `content` deliberately — it's meant
+  to bleed past the visible bays, so including it in the bounds measurement
+  would (and did, pre-fix) make the real content shrink to a sliver. The
+  resolved scene rect is exposed as `data-scene-bounds="x,y,w,h"` (screen
+  space) on `.floor-host` for tests.
+- **3x3-ish balanced grid.** `BAY_GRID` in `src/floor.ts` arranges the 6 real
+  bays + UNRESOLVED into 3 columns × 3 rows (UNRESOLVED centered on its own
+  back row) instead of V-02's diagonal staircase. `GRID_W` is tuned wider
+  relative to `GRID_H` than the tile's own 2:1 diamond ratio specifically so
+  the fixed-aspect isometric projection (both axes scale with the same
+  col+row extent, regardless of grid shape) comes out wide enough to fill a
+  16:9 viewport.
+- **Text stays legible at any scale.** `layout()` tracks every `Text` node
+  it creates (`trackText()`) with its base font size, then after computing
+  the fit scale, bumps each one's `fontSize` up so the *effective* on-screen
+  size never drops below `MIN_EFFECTIVE_FONT` (11px).
+- **Surface detail pass** (all procedural, no assets): prism faces are
+  gradient-shaded (brightest lit roof, mid-tone left wall facing the light,
+  darker right wall away from it) with a rim-light stroke along the lit
+  upper-left edge; a `BlurFilter` glow layer sits under each light pool
+  (skipped under `prefers-reduced-motion`); a faint CRT scanline overlay
+  (~5% white alpha) sits over the whole scene, separate from the amber
+  blind-pipeline overlay; bay platforms get an inset lattice grid so they
+  read as detailed decking; and each station gets small conveyor-stub
+  furniture stubs so bays don't read as empty diamonds.
+- **State-mapping table** (`src/states.ts`, `STATE_TABLE`) is the single
+  source of truth for every state's `{color, lightMode, motion, glyph,
+  beacon, label}` — see above. Fidelity overlays are unchanged from V-02
+  (`observed` solid, `inferred` dashed ghost at ~55%, `unknown` hatched with
+  no motion), layered on top of whatever `STATE_TABLE` says. A `restored`
+  record always renders through `effectiveState()` as `stale_unknown` (gray,
+  no motion, no beacon) with a `(restored)` tag appended to its label,
+  regardless of its nominal state — never trust a restored WORKING.
+
 ## Test-only DOM mirror
 
 `#scene-mirror` (hidden) lists one `<div>` per session with
 `data-station-id`, `data-state`, `data-fidelity`, `data-bay`, `data-motion`
-(`solid`/`ghost`/`none`, see `motionFor()`) attributes, so
-`tests/floor.spec.ts` can assert the rendered truth mapping without pixel
-inspection. `tests/floor.spec.ts` asserts:
+(`solid`/`ghost`/`none`, see `src/states.ts`'s `motionFor()`), `data-beacon`
+(`none`/`amber`/`red`, see `beaconFor()`), and — when the record is
+`restored` — `data-restored="true"`. `tests/floor.spec.ts` can assert the
+rendered truth mapping without pixel inspection. It asserts:
 
 1. every fixture session appears in the mirror with its exact state token;
 2. the unverified-pipeline fixture produces the blind overlay class + text;
@@ -126,12 +181,18 @@ inspection. `tests/floor.spec.ts` asserts:
 6. `public/fixtures/floor-idle.json` (all IDLE, verified pipeline, live
    remote) renders no blind overlay and a lower `data-ambient` than the busy
    default fixture;
-7. `public/fixtures/floor-blind.json` (all observers down, unverified
+7. **(V-03)** `public/fixtures/floor-states.json`'s scene-mirror matches
+   `src/states.ts` for every state × fidelity combination, including that
+   the restored WORKING station mirrors as `data-motion="none"` and
+   `data-restored="true"`;
+8. **(V-03)** at both 1280×720 and 1920×1080, `data-scene-bounds` covers
+   ≥80% of the floor-host's width and ≥70% of its height;
+9. `public/fixtures/floor-blind.json` (all observers down, unverified
    pipeline) renders the blind overlay and `PIPELINE: UNVERIFIED`.
 
 Screenshots are saved to `screenshots/floor-fixture.png`,
-`screenshots/floor-idle.png` and `screenshots/floor-blind.png` on every test
-run.
+`screenshots/floor-idle.png`, `screenshots/floor-blind.png`, and
+`screenshots/floor-states.png` on every test run.
 
 ## Tauri scaffold
 

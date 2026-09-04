@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-09-04T19:00:00Z",
+  "sessions": [
+    { "id": "st-working-observed", "bay": "SPORTS LAB", "state": "working", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 120, "label": "state-table: working" },
+    { "id": "st-thinking-observed", "bay": "AI BUSINESS COMPLEX", "state": "thinking", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 60, "label": "state-table: thinking" },
+    { "id": "st-specialist-observed", "bay": "SERVERFORGE", "state": "specialist", "fidelity": "observed", "model": "claude-opus-4.5", "model_current": "claude-opus-4.5", "elapsed_secs": 200, "label": "state-table: specialist" },
+    { "id": "st-waiting-agent-observed", "bay": "MUSIC LAB", "state": "waiting_on_agent", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 90, "label": "state-table: waiting_on_agent" },
+    { "id": "st-waiting-system-observed", "bay": "EXPERIMENTS", "state": "waiting_on_system", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 90, "label": "state-table: waiting_on_system" },
+    { "id": "st-blocked-observed", "bay": "PERSONAL/MISC", "state": "blocked", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 400, "label": "state-table: blocked" },
+    { "id": "st-brey-observed", "bay": "SPORTS LAB", "state": "brey_required", "fidelity": "observed", "model": "claude-opus-4.5", "model_current": "claude-opus-4.5", "elapsed_secs": 500, "label": "state-table: brey_required" },
+    { "id": "st-failed-observed", "bay": "AI BUSINESS COMPLEX", "state": "failed", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 30, "label": "state-table: failed" },
+    { "id": "st-hung-observed", "bay": "SERVERFORGE", "state": "hung", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 3000, "label": "state-table: hung" },
+    { "id": "st-idle-observed", "bay": "MUSIC LAB", "state": "idle", "fidelity": "observed", "model": "claude-haiku-4.5", "model_current": "claude-haiku-4.5", "elapsed_secs": 8000, "label": "state-table: idle" },
+    { "id": "st-completed-observed", "bay": "EXPERIMENTS", "state": "completed", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 10, "label": "state-table: completed" },
+    { "id": "st-stale-observed", "bay": "PERSONAL/MISC", "state": "stale_unknown", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": null, "elapsed_secs": 6000, "label": "state-table: stale_unknown" },
+    { "id": "st-fading-observed", "bay": "UNRESOLVED", "state": "fading_ended", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 20, "label": "state-table: fading_ended" },
+    { "id": "st-working-inferred", "bay": "SPORTS LAB", "state": "working", "fidelity": "inferred", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 300, "label": "state-table: working (inferred)" },
+    { "id": "st-working-restored", "bay": "AI BUSINESS COMPLEX", "state": "working", "fidelity": "observed", "model": "claude-sonnet-5", "model_current": "claude-sonnet-5", "elapsed_secs": 900, "label": "state-table: working (restored, never trust)", "restored": true }
+  ],
+  "routines": [],
+  "checks": [],
+  "observers": [
+    { "name": "remote_claude", "status": "healthy", "last_success_at": "2026-09-04T18:59:50Z", "last_error": null, "consecutive_failures": 0 }
+  ],
+  "pipeline": {
+    "verified": true,
+    "remote_estate": "live",
+    "last_sync_age_secs": 10,
+    "last_output_age_secs": 10,
+    "next_routine": "nightly-backtest"
+  },
+  "output_shelf": {
+    "SPORTS LAB": [],
+    "AI BUSINESS COMPLEX": [],
+    "SERVERFORGE": [],
+    "MUSIC LAB": [],
+    "EXPERIMENTS": [],
+    "PERSONAL/MISC": [],
+    "UNRESOLVED": []
+  }
+}
