@@ -170,6 +170,31 @@ impl RemoteClaudeObserver {
         serde_json::from_slice(&bytes).ok()
     }
 
+    /// Reads a `{"data": [...]}` snapshot and parses each element of `data`
+    /// INDEPENDENTLY, so one malformed record can't lose the whole batch.
+    /// (Adversarial finding #3: a strict whole-file deserialize meant a
+    /// single unexpected field on ONE session silently reported "zero
+    /// sessions" from what still counted as a successful poll — a
+    /// fabricated zero, which §5a explicitly forbids.) Returns `None` only
+    /// if the file itself is unreadable or isn't even valid JSON with a
+    /// `data` array — that case is still a real capability loss, handled by
+    /// the caller exactly like today's total-failure path.
+    fn read_records<T: serde::de::DeserializeOwned>(&self, filename: &str) -> Option<(Vec<T>, usize)> {
+        let path = self.feed_dir.join(filename);
+        let bytes = fs::read(&path).ok()?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        let arr = value.get("data")?.as_array()?;
+        let mut out = Vec::with_capacity(arr.len());
+        let mut failed = 0usize;
+        for item in arr {
+            match serde_json::from_value::<T>(item.clone()) {
+                Ok(v) => out.push(v),
+                Err(_) => failed += 1,
+            }
+        }
+        Some((out, failed))
+    }
+
     fn map_station_state(raw: &remote_claude_raw::RawSession) -> (StationState, Fidelity) {
         // §7a: unknown-enum path degrades rather than throws.
         if raw.connection_status.as_deref() == Some("disconnected") {
@@ -208,10 +233,13 @@ impl Observer for RemoteClaudeObserver {
         let mut events = Vec::new();
         let mut caps = CapabilitySet::new();
 
-        if let Some(snap) = self.read_json::<remote_claude_raw::SessionsSnapshot>("list_sessions.json") {
+        if let Some((records, failed)) = self.read_records::<remote_claude_raw::RawSession>("list_sessions.json") {
             caps.0.insert(CAP_SESSIONS.to_string());
+            if failed > 0 {
+                eprintln!("warning: remote_claude observer: {failed} session record(s) in list_sessions.json failed to parse and were skipped (batch not lost)");
+            }
             let mut seen_this_poll = std::collections::BTreeSet::new();
-            for raw in &snap.data {
+            for raw in &records {
                 seen_this_poll.insert(raw.id.clone());
                 self.known_session_ids.insert(raw.id.clone());
 
@@ -220,8 +248,24 @@ impl Observer for RemoteClaudeObserver {
                     caps.0.insert(CAP_PERMISSIONS.to_string());
                 }
 
-                let updated_at = Self::parse_ts(&raw.updated_at).unwrap_or(now);
-                let elapsed_ms = (now - updated_at).num_milliseconds().max(0);
+                // §16: a missing/unparseable timestamp must NOT be treated as
+                // "just happened" (elapsed_ms=0) — that would make a session
+                // with no real timestamp data look permanently fresh across
+                // every poll, and Hung could never fire for it. `None` here
+                // means "we don't know how stale this is", which the reducer
+                // must handle by NOT resetting its staleness clock (see
+                // reducer::apply_session_observed). Clock skew > 2min in
+                // either direction is treated the same way — an unparseable
+                // absolute-time claim, per §16.
+                const CLOCK_SKEW_TOLERANCE_SECS: i64 = 120;
+                let elapsed_ms = Self::parse_ts(&raw.updated_at).and_then(|updated_at| {
+                    let delta = now - updated_at;
+                    if delta.num_seconds() < -CLOCK_SKEW_TOLERANCE_SECS {
+                        None // updated_at is implausibly far in the future — skewed clock, not real freshness
+                    } else {
+                        Some(delta.num_milliseconds().max(0))
+                    }
+                });
 
                 events.push(Event {
                     ts: now,
@@ -235,18 +279,31 @@ impl Observer for RemoteClaudeObserver {
                     model_last_served: raw.external_metadata.as_ref().and_then(|m| m.last_served_model.clone()),
                     effort: None,
                     state: Some(state),
+                    // §15: redact BEFORE this leaves the observer boundary —
+                    // titles/status text are free-form and can contain paths,
+                    // emails, or accidentally-pasted secrets (adversarial
+                    // finding #6: this was previously never called at all).
                     label: raw.post_turn_summary.as_ref().and_then(|p| p.status_detail.clone())
-                        .or_else(|| raw.title.clone()),
+                        .or_else(|| raw.title.clone())
+                        .map(|s| crate::redact::redact_field(&s)),
                     detail: raw.environment_kind.clone(),
                     fidelity,
-                    metrics: Metrics { elapsed_ms: Some(elapsed_ms), ..Default::default() },
+                    metrics: Metrics { elapsed_ms, ..Default::default() },
                     ttl_secs: Some(120),
                     next_run_at: None,
                     enabled: None,
                 });
             }
             // Sessions previously seen but absent from this snapshot: SessionGone.
-            for old_id in self.known_session_ids.difference(&seen_this_poll).cloned().collect::<Vec<_>>() {
+            // Emitted once, then pruned from known_session_ids — otherwise this
+            // re-fires identically on every future poll forever, an unbounded
+            // and misleading (repeated "just went gone") event stream (§16 log
+            // growth must be bounded by construction).
+            let now_gone: Vec<String> = self.known_session_ids.difference(&seen_this_poll).cloned().collect();
+            for old_id in &now_gone {
+                self.known_session_ids.remove(old_id);
+            }
+            for old_id in now_gone {
                 events.push(Event {
                     ts: now,
                     source: self.name().to_string(),
@@ -270,12 +327,16 @@ impl Observer for RemoteClaudeObserver {
             }
         }
 
-        if let Some(snap) = self.read_json::<remote_claude_raw::TriggersSnapshot>("list_triggers.json") {
+        if let Some((records, failed)) = self.read_records::<remote_claude_raw::RawTrigger>("list_triggers.json") {
             caps.0.insert(CAP_ROUTINES.to_string());
-            for raw in &snap.data {
+            if failed > 0 {
+                eprintln!("warning: remote_claude observer: {failed} trigger record(s) in list_triggers.json failed to parse and were skipped (batch not lost)");
+            }
+            for raw in &records {
                 let next_run = Self::parse_ts(&raw.next_run_at);
-                // A disabled routine is never "overdue" — it's deliberately off, not stuck.
-                let is_overdue = raw.enabled.unwrap_or(true)
+                // A disabled (or unknown-enabled — §16 says unknown != enabled)
+                // routine is never "overdue" — it's off or unconfirmed, not stuck.
+                let is_overdue = raw.enabled.unwrap_or(false)
                     && next_run.map(|nr| now > nr + chrono::Duration::minutes(5)).unwrap_or(false);
                 if let Some(nr) = next_run {
                     self.known_trigger_next_run.insert(raw.id.clone(), nr);
@@ -293,10 +354,17 @@ impl Observer for RemoteClaudeObserver {
                     model_last_served: None,
                     effort: None,
                     state: None,
-                    label: Some(raw.name.clone()),
-                    // prompt_redacted is already truncated by the bridge — never the raw prompt (§15).
-                    detail: raw.prompt_redacted.clone(),
-                    fidelity: if raw.enabled.unwrap_or(true) { Fidelity::Observed } else { Fidelity::Observed },
+                    label: Some(crate::redact::redact_field(&raw.name)),
+                    // prompt_redacted is expected to already be truncated by
+                    // the bridge (§15: routine prompts never render raw) —
+                    // but this observer does not trust that on faith. A
+                    // defense-in-depth secret scrub runs here too, since
+                    // adversarial finding #6 showed the crate's own redactor
+                    // was never actually being called anywhere at all.
+                    detail: raw.prompt_redacted.as_deref().map(crate::redact::scrub_secrets),
+                    // The routine's enabled/overdue facts are directly observed
+                    // from the trigger snapshot — always Observed fidelity here.
+                    fidelity: Fidelity::Observed,
                     metrics: Metrics::default(),
                     ttl_secs: Some(600),
                     next_run_at: next_run,

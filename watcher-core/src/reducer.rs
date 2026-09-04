@@ -7,6 +7,7 @@
 //!      not scattered across observers.
 
 use crate::health::{ObserverHealth, ObserverStatus};
+use crate::observer::{CAP_ROUTINES, CAP_SESSIONS};
 use crate::schema::{Event, EventKind, Fidelity, StationState};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -58,11 +59,20 @@ pub struct SessionRecord {
     pub last_activity_at: DateTime<Utc>,
     pub stall_warning: bool,
     pub gone: bool,
+    /// When `gone` first became true. §16 requires a 60s "fading" grace
+    /// state before a station folds down as ENDED — it must never just
+    /// vanish from the floor without a trace (adversarial finding #5).
+    pub gone_at: Option<DateTime<Utc>>,
 }
+
+/// §16's 60s fading-then-ENDED grace window for a session that disappeared
+/// from the observer's snapshot.
+pub const GONE_FADE_SECS: i64 = 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutineRecord {
     pub id: String,
+    pub source: String,
     pub name: String,
     pub bound_session_id: Option<String>,
     pub overdue: bool,
@@ -70,6 +80,12 @@ pub struct RoutineRecord {
     pub next_run_at: Option<DateTime<Utc>>,
     pub prompt_redacted: Option<String>,
     pub last_seen_at: DateTime<Utc>,
+    /// True when the routines capability was missing on the most recent
+    /// poll — this routine's overdue/enabled/next_run_at fields are frozen
+    /// at their last-known values and must not be trusted or rendered as
+    /// current (adversarial finding #4: routines were never degraded at
+    /// all, so a 2h-dead snapshot still rendered green "ON SCHEDULE").
+    pub stale: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -101,6 +117,9 @@ impl StateStore {
                 EventKind::SessionObserved => self.apply_session_observed(ev, now),
                 EventKind::SessionGone => {
                     if let Some(rec) = self.sessions.get_mut(&ev.entity.id) {
+                        if !rec.gone {
+                            rec.gone_at = Some(now);
+                        }
                         rec.gone = true;
                         rec.displayed_state = Field::new(StationState::StaleUnknown, now, Fidelity::Observed);
                     }
@@ -120,11 +139,15 @@ impl StateStore {
         // elapsed_ms metric (itself computed from the provider's updated_at),
         // NOT from `now` — `now` is only when WE polled, which says nothing
         // about whether the session actually did anything since last time.
-        let activity_at = ev
-            .metrics
-            .elapsed_ms
-            .map(|ms| now - chrono::Duration::milliseconds(ms))
-            .unwrap_or(now);
+        // `None` means the observer could not establish a real timestamp
+        // (missing/unparseable/clock-skewed). CRITICAL: on an EXISTING
+        // record this must NOT fall back to `now` — doing so was an actual
+        // bug (adversarial finding #2): every poll would re-anchor the
+        // staleness clock to "just now", so a session with no real
+        // timestamp data could never be flagged Hung no matter how many
+        // hours passed. `now` is only an acceptable fallback the very first
+        // time we ever see a session (nothing better to anchor to yet).
+        let activity_at = ev.metrics.elapsed_ms.map(|ms| now - chrono::Duration::milliseconds(ms));
 
         let entry = self.sessions.entry(ev.entity.id.clone()).or_insert_with(|| SessionRecord {
             id: ev.entity.id.clone(),
@@ -137,16 +160,20 @@ impl StateStore {
             label: None,
             session_kind: None,
             last_polled_at: now,
-            last_activity_at: activity_at,
+            last_activity_at: activity_at.unwrap_or(now),
             stall_warning: false,
             gone: false,
+            gone_at: None,
         });
         entry.observed_state = Field::new(state, now, ev.fidelity);
         entry.displayed_state = Field::new(state, now, ev.fidelity);
         entry.source = ev.source.clone();
         entry.last_polled_at = now;
-        entry.last_activity_at = activity_at;
+        if let Some(a) = activity_at {
+            entry.last_activity_at = a;
+        }
         entry.gone = false;
+        entry.gone_at = None;
         if let Some(m) = &ev.model {
             entry.model = Some(Field::new(m.clone(), now, ev.fidelity));
         }
@@ -165,16 +192,23 @@ impl StateStore {
     }
 
     fn apply_routine(&mut self, ev: &Event, now: DateTime<Utc>, overdue: bool) {
+        // §16/schema.rs contract: `None` enabled means UNKNOWN, not enabled.
+        // Defaulting to `true` (as this used to) would render a routine
+        // whose enabled-state we can't confirm as a confident green
+        // "ON SCHEDULE" — the safe default is `false` (adversarial finding #4).
         let entry = self.routines.entry(ev.entity.id.clone()).or_insert_with(|| RoutineRecord {
             id: ev.entity.id.clone(),
+            source: ev.source.clone(),
             name: ev.label.clone().unwrap_or_default(),
             bound_session_id: ev.session_id.clone(),
             overdue,
-            enabled: ev.enabled.unwrap_or(true),
+            enabled: ev.enabled.unwrap_or(false),
             next_run_at: ev.next_run_at,
             prompt_redacted: ev.detail.clone(),
             last_seen_at: now,
+            stale: false,
         });
+        entry.source = ev.source.clone();
         entry.name = ev.label.clone().unwrap_or_else(|| entry.name.clone());
         entry.bound_session_id = ev.session_id.clone().or(entry.bound_session_id.clone());
         entry.overdue = overdue;
@@ -182,6 +216,7 @@ impl StateStore {
         entry.next_run_at = ev.next_run_at.or(entry.next_run_at);
         entry.prompt_redacted = ev.detail.clone().or(entry.prompt_redacted.clone());
         entry.last_seen_at = now;
+        entry.stale = false;
     }
 
     /// Rule 2: STALL derivation. Only sessions the observer reports as
@@ -206,34 +241,61 @@ impl StateStore {
     }
 
     /// Rule 1: absence is UNKNOWN. Call once per poll cycle per observer,
-    /// after `observer.poll()`, passing its current health. ANY non-Healthy
-    /// status (Degraded on the very first failed poll, or Down after
-    /// repeated ones) degrades every record it sources to StaleUnknown — it
-    /// does NOT leave them frozen at their last-good value, which would
-    /// silently look healthy forever. `ObserverStatus::Down` only escalates
-    /// the *observer's own* health badge (and the marquee's alarm level);
-    /// it is not the threshold for whether the data it sourced can be
-    /// trusted — a single failed poll already means "we don't know".
+    /// after `observer.poll()`, passing its current health.
+    ///
+    /// Degradation is CAPABILITY-SPECIFIC, not just an overall status check
+    /// (adversarial finding #3/#4, both from the same root cause): an
+    /// observer that still supplies routines but has lost sessions must
+    /// degrade sessions WITHOUT falsely also degrading routines that are
+    /// still fine, and vice versa. A blanket "status != Healthy degrades
+    /// everything" rule gets both directions wrong — it can under-degrade
+    /// (miss a partial loss the aggregate status doesn't reflect) or
+    /// over-degrade (punish data that's still genuinely fresh). So this
+    /// checks `health.capabilities` per capability instead of trusting the
+    /// single rolled-up `status` enum. It does NOT leave anything frozen at
+    /// its last-good value, which would silently look healthy forever.
     pub fn apply_observer_health(&mut self, health: &ObserverHealth, now: DateTime<Utc>) {
-        let should_degrade = !matches!(health.status, ObserverStatus::Healthy);
+        let sessions_lost = !health.capabilities.has(CAP_SESSIONS);
+        let routines_lost = !health.capabilities.has(CAP_ROUTINES);
         self.observer_health.insert(health.name.clone(), health.clone());
-        if should_degrade {
+
+        if sessions_lost {
             for rec in self.sessions.values_mut() {
                 if rec.source == health.name {
                     rec.displayed_state = Field::new(StationState::StaleUnknown, now, Fidelity::Unknown);
                 }
             }
         }
+        for rec in self.routines.values_mut() {
+            if rec.source == health.name {
+                rec.stale = routines_lost;
+            }
+        }
     }
 
     /// §16 "false everything-healthy" defense: if no canary heartbeat has
     /// landed recently, the floor must NOT be trusted, no matter how good the
-    /// last snapshot looked.
+    /// last snapshot looked. The canary alone is NOT sufficient, though — it
+    /// only proves the poll loop itself is alive, in-process, unconditionally
+    /// (adversarial finding: a fully DOWN `remote_claude` observer still let
+    /// the canary carry "pipeline verified" while every session was blind).
+    /// So this also requires no *real* (non-canary) observer to be Down —
+    /// the top-line claim must reflect the data sources, not just the loop.
     pub fn pipeline_verified(&self, now: DateTime<Utc>, max_canary_age_secs: i64) -> bool {
-        match self.pipeline.last_canary_at {
+        let canary_fresh = match self.pipeline.last_canary_at {
             Some(t) => (now - t).num_seconds() <= max_canary_age_secs,
             None => false,
-        }
+        };
+        canary_fresh && !self.any_real_observer_down()
+    }
+
+    /// True if any observer other than the synthetic canary itself has gone
+    /// Down. Used by `pipeline_verified` and available for the renderer to
+    /// name which observer broke the top-line claim.
+    pub fn any_real_observer_down(&self) -> bool {
+        self.observer_health
+            .values()
+            .any(|h| h.name != "synthetic_canary" && matches!(h.status, ObserverStatus::Down))
     }
 
     pub fn last_sync_age_secs(&self, now: DateTime<Utc>) -> Option<i64> {
