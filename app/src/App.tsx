@@ -17,6 +17,24 @@ import { DeepDebug, IncidentPanel, ProjectFocus } from "./ModeOverlays";
 const AUTOPILOT_IDLE_MS = 60_000;
 const AUTOPILOT_DRIFT_MS = 20_000;
 
+/** Test-only overrides for the autopilot timers, via `?autopilotIdleMs=` /
+ *  `?autopilotDwellMs=` query params — lets tests exercise the COMMAND
+ *  CENTER -> PROJECT FOCUS -> back drift without waiting on real 60s/20s
+ *  timers. Falls back to the production defaults when absent or invalid. */
+function readAutopilotTimings(): { idleMs: number; driftMs: number } {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const idle = Number(params.get("autopilotIdleMs"));
+    const dwell = Number(params.get("autopilotDwellMs"));
+    return {
+      idleMs: Number.isFinite(idle) && idle > 0 ? idle : AUTOPILOT_IDLE_MS,
+      driftMs: Number.isFinite(dwell) && dwell > 0 ? dwell : AUTOPILOT_DRIFT_MS,
+    };
+  } catch {
+    return { idleMs: AUTOPILOT_IDLE_MS, driftMs: AUTOPILOT_DRIFT_MS };
+  }
+}
+
 function loadStoredMode(): Mode | null {
   try {
     const v = localStorage.getItem(MODE_STORAGE_KEY);
@@ -145,10 +163,12 @@ export function App() {
   // detectIncident effect above, which runs independent of this timer).
   useEffect(() => {
     if (!state) return;
+    const { idleMs, driftMs } = readAutopilotTimings();
+    const pollMs = Math.min(1000, Math.max(50, Math.floor(idleMs / 4)));
     const iv = window.setInterval(() => {
       if (modeRef.current !== "command") return;
       const idleFor = Date.now() - autopilotArmedAt.current;
-      if (idleFor >= AUTOPILOT_IDLE_MS && autopilotDriftTimer.current === null) {
+      if (idleFor >= idleMs && autopilotDriftTimer.current === null) {
         autopilotReturnMode.current = "command";
         setFocusBay(mostActiveBay(state) ?? BAYS[0]);
         setModeRaw("focus");
@@ -156,9 +176,9 @@ export function App() {
           autopilotDriftTimer.current = null;
           setModeRaw((cur) => (cur === "focus" ? "command" : cur));
           autopilotArmedAt.current = Date.now();
-        }, AUTOPILOT_DRIFT_MS);
+        }, driftMs);
       }
-    }, 1000);
+    }, pollMs);
     return () => window.clearInterval(iv);
   }, [state]);
 
@@ -166,7 +186,14 @@ export function App() {
     if (!state || !hostRef.current) return;
     let handle: FloorHandle | null = null;
     let disposed = false;
-    mountFloor(hostRef.current, state, { getMode: () => modeRef.current }).then((h) => {
+    mountFloor(hostRef.current, state, {
+      getMode: () => modeRef.current,
+      onBayClick: (bay) => {
+        autopilotArmedAt.current = Date.now();
+        setFocusBay(bay);
+        setMode("focus");
+      },
+    }).then((h) => {
       if (disposed) {
         h.destroy();
       } else {

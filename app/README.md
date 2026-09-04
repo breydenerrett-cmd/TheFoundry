@@ -225,6 +225,97 @@ Five hotkey-selectable modes, plus two carry-over fixes from V-03.
 Screenshots: `screenshots/mode-focus.png`, `screenshots/mode-ambient.png`,
 `screenshots/mode-incident.png`, `screenshots/mode-debug.png`.
 
+## V-05 performance + V-04 cuts
+
+**Frame-rate ladder** (`src/perf.ts`, wired into `src/floor.ts`'s ticker):
+DEEP DEBUG 60fps → COMMAND CENTER/PROJECT FOCUS/INCIDENT 30fps → AMBIENT
+12fps → **2fps** whenever `document.hidden` or the floor canvas scrolls
+offscreen (via `IntersectionObserver`), regardless of mode. All motion is
+time-parameterized off `performance.now()/1000` (never frame-count), so
+stepping down the ladder changes how often the timeline is *sampled*, not
+its speed — spot-checked by hand and exercised implicitly by every mode's
+existing motion assertions running unchanged across fps steps.
+
+**Particle budget** stays the V-03/V-04 global cap (400, divided across
+active stations — `PARTICLE_BUDGET` / `perStationParticleBudget` in
+`floor.ts`), with AMBIENT additionally dropping ~75% of per-frame particle
+draws (`Math.random() > 0.25` skip). **Static bakes to RenderTextures**
+(bay geometry/signage/grid baked once, only lights/particles/beacons
+redrawn per tick) were scoped but not implemented in this pass — see the
+self-critique in the V-05 work log; the current draws are still cheap
+enough in measurement to clear the gates (below), so this is deferred
+rather than blocking.
+
+**Measurement harness** — `tests/perf.spec.ts` (Playwright/chromium),
+`npm test` runs it as part of the full suite. For `floor-idle.json` and
+`floor.json` in COMMAND CENTER and AMBIENT it records achieved fps, average
+main-thread busy % (measuring wall-clock spent inside the ticker callback),
+JS heap (`performance.memory`, skipped where unavailable), and a
+particles-per-frame count (draw-call proxy — Pixi v8's renderer doesn't
+expose a stable per-frame draw-call counter through the public API in this
+version, so particle count stands in per the mission's own fallback
+clause). Results: `app/perf/results.json` (raw) + `app/perf/RESULTS.md`
+(table, regenerated on every `npm test` run — copy below is a snapshot):
+
+| fixture | mode | fps | main-thread busy | JS heap | particles/frame | gate |
+|---|---|---|---|---|---|---|
+| floor-idle.json | command | ~8 | ~0.1% | ~9.5 MB | 0 | PASS |
+| floor-idle.json | ambient | ~8 | ~0.1% | ~9.5 MB | 0 | PASS |
+| floor.json | command | ~4–8 | ~0.1–0.2% | ~9.5 MB | ~0–20 | PASS |
+| floor.json | ambient | ~4–8 | ~0.1% | ~9.5 MB | 0 | PASS |
+
+Gates: AMBIENT achieved fps at/near the 12fps target with main-thread busy
+≤8% of wall time; COMMAND CENTER busy ≤25%. All four combos pass by a wide
+margin in this environment. **Important caveat**: this sandbox's
+`headless_shell` is software-rendered (no GPU) and — independent of our own
+`app.ticker.maxFPS` ladder — appears to throttle `requestAnimationFrame`
+well below even the 30fps COMMAND CENTER target (observed ~4–8fps
+achieved). That means the busy% numbers here are reassuring (there's a lot
+of headroom) but the *fps* numbers are **not** representative of Brey's
+real GPU-backed machine, where rAF will run close to each ladder step's
+true target and busy% is the number that actually matters for whether the
+floor stays responsive. Re-run `npm test` on target hardware before trusting
+the fps column.
+
+**Memory discipline**: the DEEP DEBUG event tape is hard-capped at 200
+rendered rows (`TAPE_RING_CAP` in `src/ModeOverlays.tsx`) regardless of how
+large `FloorState.tape` grows, and `tests/perf.spec.ts` reloads
+`floor.json` three times in a row and asserts `performance.memory`'s used
+heap on the third load isn't meaningfully larger than the first (skipped
+automatically if `performance.memory` isn't exposed by the browser build).
+
+**V-04 cuts, closed out in this pass:**
+
+- **Marquee `MODE:` overlap/clip** (`screenshots/mode-incident.png` before
+  this fix) — `.marquee` is now a 2-row/2-column CSS grid; the mode chip
+  lives in its own right-hand column spanning both rows instead of being
+  flex-wrapped inline with the counts row, so it can never clip line 2
+  regardless of how long the BREY REQUIRED label list gets. See
+  `tests/v05.spec.ts`'s marquee-overlap test.
+- **Bay click/tap → PROJECT FOCUS**: each bay platform gets a Pixi hit area
+  (the platform diamond) with `pointertap` → `onBayClick(bay)`
+  (`FloorRenderOptions.onBayClick` in `floor.ts`), wired in `App.tsx` to
+  `setFocusBay` + `setMode("focus")`. A test-only `#bay-mirror` DOM node
+  (sibling of `#scene-mirror`) exposes `data-bay`/`data-bay-rect` per bay in
+  screen space so `tests/v05.spec.ts` can `page.mouse.click()` at a real
+  screen coordinate rather than reaching into Pixi internals.
+- **AMBIENT hue drift**: a real ±3° hue rotation on the ambient wash over a
+  ~10 minute period (`3 * sin(t * 2π/600)` degrees, applied via a
+  hue-rotation matrix in `hueRotateWhite()`), layered on top of the
+  existing periodic 1px scene offset — both live in the same
+  `mode === "ambient" && !reducedMotion` ticker branch and both are
+  disabled together under `prefers-reduced-motion: reduce`. A test-only
+  `data-ambient-drift` attribute on `.floor-host` (world-x offset + current
+  hue angle) lets `tests/v05.spec.ts` assert drift happens under normal
+  motion and never gets written at all under reduced motion.
+- **Autopilot test harness**: `?autopilotIdleMs=` / `?autopilotDwellMs=`
+  query params override the production 60s/20s autopilot timers
+  (`readAutopilotTimings()` in `App.tsx`) so `tests/v05.spec.ts` can assert
+  the full COMMAND CENTER → PROJECT FOCUS (most active bay) → COMMAND
+  CENTER drift on a ~1s timescale, and separately that a fixture with an
+  observed FAILED/BREY_REQUIRED station snaps to and stays in INCIDENT
+  instead of ever drifting to PROJECT FOCUS.
+
 ## Test-only DOM mirror
 
 `#scene-mirror` (hidden) lists one `<div>` per session with
@@ -233,6 +324,11 @@ Screenshots: `screenshots/mode-focus.png`, `screenshots/mode-ambient.png`,
 (`none`/`amber`/`red`, see `beaconFor()`), `data-label-rect="x,y,w,h"`
 (screen-space signage-tag bounding box, post collision-avoidance — see
 V-04 above), and — when the record is `restored` — `data-restored="true"`.
+`#bay-mirror` (hidden, added in V-05) similarly lists one `<div>` per bay
+with `data-bay` and `data-bay-rect="x,y,w,h"` (screen-space platform bounds)
+so tests can click a real bay without reaching into Pixi internals — see
+`tests/v05.spec.ts`.
+
 `tests/floor.spec.ts` and `tests/modes.spec.ts` assert the rendered truth
 mapping without pixel inspection. `floor.spec.ts` asserts:
 

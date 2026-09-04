@@ -48,12 +48,12 @@ export function Marquee({ state, mode }: { state: FloorState; mode?: Mode }) {
         <span className={cls(waitingCount > 0, false)}>{waitingCount} WAITING</span>
         <span className={cls(staleCount > 0, true)}>{staleCount} STALE</span>
         <span className={cls(opusCount > 0, false)}>{opusCount} OPUS</span>
-        {mode && (
-          <span className="marquee-mode" data-testid="mode-indicator">
-            MODE: {MODE_LABEL[mode]}
-          </span>
-        )}
       </div>
+      {mode && (
+        <span className="marquee-mode" data-testid="mode-indicator">
+          MODE: {MODE_LABEL[mode]}
+        </span>
+      )}
       <div className="marquee-row marquee-status">
         <span>LAST OUTPUT {fmtAge(pipeline.last_output_age_secs)}</span>
         <span>

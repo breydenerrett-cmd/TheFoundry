@@ -104,3 +104,9 @@
 - `--state-json PATH` (atomic per poll) and `--serve 127.0.0.1:PORT` (dependency-free std::net HTTP: `/state`, `/health`, no-store, localhost-only CORS, optional `X-Foundry-Token`, refuses non-loopback binds). Live demo served real state at 127.0.0.1:8799.
 - Redactor: UUID-shaped local session ids were being scrubbed (breaking UI keying) — added an RFC-4122 exemption with a test that a real key still redacts. Tests 100 → **108**.
 - Sonnet worker ~167k tokens. V-05 running; L-01 app side next.
+
+## 2026-09-05T02:00Z — V-05 performance + V-04 cuts
+
+- Frame-rate ladder (DEEP DEBUG 60 / COMMAND 30 / AMBIENT 12 / hidden 2), time-parameterized motion, particle budget, tape ring cap. Measured harness (`app/perf/RESULTS.md`): main-thread busy ≤0.2% in every fixture×mode combo, heap flat across 3 reloads. **Caveat:** headless software rendering throttles rAF, so the fps column proves nothing about ladder targets — re-measure on Brey's GPU. Marquee overlap fixed (2-row grid, mode chip in own column), bay click→PROJECT FOCUS, real ±3° hue drift in AMBIENT, autopilot tested (idle→focus→back; FAILED snaps to INCIDENT). Playwright 17 → **25**.
+- Scope cuts, explicit: no static RenderTexture bakes (gates passed without them); 6s not 20s measurement windows.
+- Sonnet worker ~145k tokens. L-01 app side next.

@@ -7,6 +7,7 @@ import type { BayName, Fidelity, FloorState, SessionRecord, StationState } from 
 import { BAYS, isOpusModel } from "./state";
 import { AMBIENT_DIM, AMBIENT_LIT, COLORS, FONT_STACK, STATE_LABEL } from "./theme";
 import { STATE_TABLE, beaconFor, effectiveState, motionFor as motionForTable } from "./states";
+import { createPerfLadder, installPerfStats } from "./perf";
 
 /** Minimum effective (post-scale) font size, per V-03 §1 legibility rule. */
 const MIN_EFFECTIVE_FONT = 11;
@@ -155,6 +156,9 @@ export interface FloorRenderOptions {
    *  ambience) can change the floor's performance profile without a
    *  remount. Defaults to "command" (V-03 behavior, unchanged). */
   getMode?: () => "command" | "focus" | "ambient" | "incident" | "debug";
+  /** Called when a bay's platform is clicked/tapped — App.tsx uses this to
+   *  jump into PROJECT FOCUS for that bay. */
+  onBayClick?: (bay: BayName) => void;
 }
 
 export function mountFloor(
@@ -163,6 +167,7 @@ export function mountFloor(
   options: FloorRenderOptions = {}
 ): Promise<FloorHandle> {
   const getMode = options.getMode ?? (() => "command" as const);
+  const onBayClick = options.onBayClick;
   const app = new Application();
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -189,6 +194,7 @@ export function mountFloor(
       app.stage.addChild(overlay);
 
       const stations: StationSprite[] = [];
+      const bayContainers = new Map<BayName, Container>();
       const activeCount = state.sessions.filter(
         (s) => (s.state === "working" || s.state === "thinking" || s.state === "specialist") &&
           s.fidelity !== "unknown"
@@ -219,6 +225,7 @@ export function mountFloor(
         world.y = 0;
         scaledTexts = [];
         stations.length = 0;
+        bayContainers.clear();
 
         const { width, height } = app.screen;
         const shelfMap = state.output_shelf;
@@ -241,6 +248,20 @@ export function mountFloor(
           content.addChild(bayContainer);
 
           drawBayPlatform(bayContainer, bay);
+          bayContainers.set(bay, bayContainer);
+
+          // Bay click/tap hit area: the platform diamond (plus skirt), used
+          // to jump straight into PROJECT FOCUS for that bay. UNRESOLVED
+          // isn't a real bay to focus on, so it's excluded.
+          if (bay !== "UNRESOLVED" && onBayClick) {
+            const hit = new Graphics();
+            hit.poly([0, -TILE_H / 2, TILE_W / 2, 0, 0, TILE_H, -TILE_W / 2, 0]);
+            hit.fill({ color: 0xffffff, alpha: 0 });
+            hit.eventMode = "static";
+            hit.cursor = "pointer";
+            hit.on("pointertap", () => onBayClick(bay));
+            bayContainer.addChild(hit);
+          }
 
           const sessions = state.sessions.filter((s) => s.bay === bay);
           const cols = 3;
@@ -289,6 +310,29 @@ export function mountFloor(
         for (const { text, base } of scaledTexts) {
           const needed = MIN_EFFECTIVE_FONT / fitScale;
           text.style.fontSize = Math.max(base, needed);
+        }
+
+        updateBayMirror();
+      }
+
+      // Test-only truth mirror for bay click hit-testing: one element per
+      // bay carrying its screen-space rect, so tests can `page.mouse.click`
+      // at the platform's center without reaching into Pixi internals.
+      function updateBayMirror(): void {
+        let mirror = document.getElementById("bay-mirror");
+        if (!mirror) {
+          mirror = document.createElement("div");
+          mirror.id = "bay-mirror";
+          mirror.hidden = true;
+          canvasHost.parentElement?.appendChild(mirror);
+        }
+        mirror.innerHTML = "";
+        for (const [bay, container] of bayContainers) {
+          const b = container.getBounds();
+          const row = document.createElement("div");
+          row.dataset.bay = bay;
+          row.dataset.bayRect = [b.x, b.y, b.width, b.height].map((n) => n.toFixed(1)).join(",");
+          mirror.appendChild(row);
         }
       }
 
@@ -832,18 +876,29 @@ export function mountFloor(
         drawAmbientWash(performance.now() / 1000);
       });
 
-      // 30fps cap + reduced-motion respect. Motion is time-parameterized
-      // (elapsed seconds), never frame-count-parameterized.
+      // Frame-rate ladder (V-05): DEEP DEBUG 60 / COMMAND CENTER,PROJECT
+      // FOCUS,INCIDENT 30 / AMBIENT 12, forced to 2fps whenever the page is
+      // hidden or the canvas scrolls offscreen. Motion stays time-
+      // parameterized (driven by `t = performance.now()/1000`, never by
+      // frame count) so lowering the tick rate slows *sampling*, not the
+      // animation's actual speed — verified by tests/perf.spec.ts.
+      const perfStats = installPerfStats() as ReturnType<typeof installPerfStats> & {
+        _recordFrame: (busyMs: number, particleCount: number) => void;
+      };
+      const perfLadder = createPerfLadder({ getMode, el: canvasHost });
       let elapsed = 0;
-      let lastMode: ReturnType<typeof getMode> | null = null;
-      app.ticker.maxFPS = 30;
+      let lastFps = -1;
+      let ambientHueDeg = 0; // slow burn-in-hygiene hue drift, AMBIENT only
+      app.ticker.maxFPS = perfLadder.targetFps();
       app.ticker.add((ticker) => {
+        const frameStart = performance.now();
         const mode = getMode();
-        if (mode !== lastMode) {
-          lastMode = mode;
-          app.ticker.maxFPS = mode === "ambient" ? 12 : mode === "debug" ? 60 : 30;
+        const targetFps = perfLadder.targetFps();
+        if (targetFps !== lastFps) {
+          lastFps = targetFps;
+          app.ticker.maxFPS = targetFps;
         }
-        const frameBudget = mode === "ambient" ? 1 / 12 : mode === "debug" ? 1 / 60 : 1 / 30;
+        const frameBudget = 1 / targetFps;
         elapsed += ticker.deltaMS / 1000;
         if (elapsed < frameBudget) return;
         elapsed = 0;
@@ -851,13 +906,26 @@ export function mountFloor(
         drawAmbientWash(t);
 
         if (mode === "ambient" && !reducedMotion) {
-          // Burn-in hygiene: slow hue drift on the ambient wash + a periodic
-          // 1px scene offset. Ambience never drops the truth line — this is
-          // purely a floor-visual, the marquee is untouched.
+          // Burn-in hygiene: slow hue drift on the ambient wash (+/-3deg
+          // over ~10min, i.e. a ~0.005deg/s crawl) + a periodic 1px scene
+          // offset. Ambience never drops the truth line — this is purely a
+          // floor-visual, the marquee is untouched.
+          ambientHueDeg = 3 * Math.sin(t * ((Math.PI * 2) / 600));
+          ambientWash.tint = hueRotateWhite(ambientHueDeg);
           world.x += Math.sin(t * 0.05) > 0.999 ? 1 : 0;
+          // Test-only hook: expose the raw burn-in offset + hue angle so
+          // tests/v05.spec.ts can assert drift happens (and doesn't, under
+          // reduced-motion) without reaching into Pixi internals.
+          canvasHost.dataset.ambientDrift = `${world.x.toFixed(1)},${ambientHueDeg.toFixed(3)}`;
+        } else if (ambientWash.tint !== 0xffffff) {
+          ambientWash.tint = 0xffffff;
         }
 
-        if (reducedMotion) return;
+        let particleCount = 0;
+        if (reducedMotion) {
+          perfStats._recordFrame(performance.now() - frameStart, 0);
+          return;
+        }
 
         for (const st of stations) {
           if (mode === "ambient" && Math.random() > 0.25) continue; // reduced particle budget
@@ -875,7 +943,7 @@ export function mountFloor(
               st.chassis.pivot.set(0, 0);
               st.chassis.rotation = motion === "solid" ? stroke * 0.02 : 0;
               if (motion === "solid") {
-                spawnSparkParticles(st, t);
+                particleCount += spawnSparkParticles(st, t);
               } else {
                 ghostOutline(st.particleLayer, t);
               }
@@ -883,7 +951,7 @@ export function mountFloor(
               const pulse = 0.75 + 0.25 * Math.sin(t * 1.6 + st.phase);
               st.chassis.alpha = alpha * pulse;
               if (motion === "solid") {
-                spawnDriftParticles(st, t);
+                particleCount += spawnDriftParticles(st, t);
               } else {
                 ghostOutline(st.particleLayer, t);
               }
@@ -891,7 +959,7 @@ export function mountFloor(
               const pulse = 0.85 + 0.15 * Math.sin(t * 0.8 + st.phase);
               st.chassis.alpha = alpha * pulse;
               if (motion === "solid") {
-                spawnPlumeParticles(st, t);
+                particleCount += spawnPlumeParticles(st, t);
               } else {
                 ghostOutline(st.particleLayer, t);
               }
@@ -921,9 +989,10 @@ export function mountFloor(
             st.chassis.alpha = 0.55 + 0.1 * Math.sin(t * 8 + st.phase);
           }
         }
+        perfStats._recordFrame(performance.now() - frameStart, particleCount);
       });
 
-      function spawnSparkParticles(st: StationSprite, t: number): void {
+      function spawnSparkParticles(st: StationSprite, t: number): number {
         const n = Math.min(perStationParticleBudget, 8);
         for (let i = 0; i < n; i++) {
           const seed = i * 13.37 + st.phase;
@@ -935,9 +1004,10 @@ export function mountFloor(
           st.particleLayer.circle(x, y, 1.4 * (1 - life));
           st.particleLayer.fill({ color: COLORS.amberBright, alpha: 0.8 * (1 - life) });
         }
+        return n;
       }
 
-      function spawnDriftParticles(st: StationSprite, t: number): void {
+      function spawnDriftParticles(st: StationSprite, t: number): number {
         const n = Math.min(perStationParticleBudget, 6);
         for (let i = 0; i < n; i++) {
           const seed = i * 7.77 + st.phase;
@@ -947,9 +1017,10 @@ export function mountFloor(
           st.particleLayer.circle(x, y, 1.2 * (1 - life));
           st.particleLayer.fill({ color: COLORS.blue, alpha: 0.6 * (1 - life) });
         }
+        return n;
       }
 
-      function spawnPlumeParticles(st: StationSprite, t: number): void {
+      function spawnPlumeParticles(st: StationSprite, t: number): number {
         const n = Math.min(perStationParticleBudget, 5);
         for (let i = 0; i < n; i++) {
           const seed = i * 5.55 + st.phase;
@@ -959,6 +1030,7 @@ export function mountFloor(
           st.particleLayer.circle(x, y, 1.6 * (1 - life * 0.6));
           st.particleLayer.fill({ color: COLORS.violet, alpha: 0.5 * (1 - life) });
         }
+        return n;
       }
 
       function ghostOutline(g: Graphics, t: number): void {
@@ -968,10 +1040,26 @@ export function mountFloor(
 
       return {
         destroy: () => {
+          perfLadder.destroy();
           app.destroy(true, { children: true });
         },
       };
     });
+}
+
+/** Rotates pure white by `deg` degrees of hue and returns it as a 0xRRGGBB
+ *  tint — used for the AMBIENT burn-in-hygiene hue drift on `ambientWash`.
+ *  Small angles only (+/-3deg), so this stays visually subtle by design. */
+function hueRotateWhite(deg: number): number {
+  const rad = (deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  // Standard hue-rotation matrix applied to (1,1,1) white.
+  const r = 0.213 + cos * 0.787 - sin * 0.213;
+  const g = 0.715 - cos * 0.715 - sin * 0.715;
+  const b = 0.072 - cos * 0.072 + sin * 0.928;
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255)));
+  return (clamp(r) << 16) | (clamp(g) << 8) | clamp(b);
 }
 
 function fmtElapsed(secs: number): string {

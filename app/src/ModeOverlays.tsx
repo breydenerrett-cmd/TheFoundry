@@ -162,9 +162,17 @@ export function IncidentPanel({ station, bay }: { station: SessionRecord | null;
 
 /** DEEP DEBUG — L3 station detail + L4 redacted event tape, per-observer
  *  health (capabilities + last error), and the MACHINES list. */
+/** Memory discipline (V-05): the event tape never renders more than this
+ *  many rows, however large the underlying fixture/feed gets — a live feed
+ *  is an append-only stream and DOM nodes are real memory, so this is a
+ *  hard ring-buffer cap, not just a display truncation. Keeps the newest
+ *  events (the tail), which is what DEEP DEBUG cares about. */
+const TAPE_RING_CAP = 200;
+
 export function DeepDebug({ state, bay }: { state: FloorState; bay: BayName | null }) {
   const sessions = bay ? state.sessions.filter((s) => s.bay === bay) : state.sessions;
-  const tape = state.tape ?? [];
+  const fullTape = state.tape ?? [];
+  const tape = fullTape.length > TAPE_RING_CAP ? fullTape.slice(-TAPE_RING_CAP) : fullTape;
   const machines = state.machines ?? [];
 
   return (
