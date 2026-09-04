@@ -77,36 +77,17 @@ pub fn render_floor(
     let mut out = String::new();
     let pipeline_ok = store.pipeline_verified(now, 300);
 
-    // Marquee (§2 point 6 / §5a).
+    // Marquee (§2 point 6 / §5a). Shared with `export.rs` via
+    // `StateStore::session_state_counts`/`overdue_routines_count`/
+    // `next_routine` so the live text and the JSON export can never
+    // silently disagree about these numbers.
     let mut counts = std::collections::BTreeMap::<&str, u32>::new();
-    for rec in store.sessions.values() {
-        if rec.gone {
-            continue;
-        }
-        *counts
-            .entry(state_label(rec.displayed_state.value))
-            .or_insert(0) += 1;
+    for (state, n) in store.session_state_counts() {
+        *counts.entry(state_label(state)).or_insert(0) += n;
     }
-    // Stale routines are excluded from the confident "overdue" count — their
-    // overdue flag is a frozen last-known value, not verified this poll.
-    let overdue_routines = store
-        .routines
-        .values()
-        .filter(|r| r.overdue && !r.stale)
-        .count();
-    // Soonest-due enabled routine, by actual next_run_at — not iteration order,
-    // and never a disabled routine (it has no meaningful "next").
+    let overdue_routines = store.overdue_routines_count();
     let next_routine = store
-        .routines
-        .values()
-        // F-6: `stale` (unverified this poll) and `restored` (carried over
-        // from a loaded snapshot) schedules must not be advertised as the
-        // estate's next scheduled run — only `enabled` was checked before,
-        // which let a frozen/unconfirmed `next_run_at` still headline the
-        // marquee.
-        .filter(|r| r.enabled && !r.stale && !r.restored)
-        .filter_map(|r| r.next_run_at.map(|t| (t, &r.name)))
-        .min_by_key(|(t, _)| *t)
+        .next_routine()
         .map(|(t, name)| format!("{name} ({})", t.format("%H:%M UTC")))
         .unwrap_or_else(|| "—".into());
 

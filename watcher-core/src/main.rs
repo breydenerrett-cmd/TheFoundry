@@ -26,15 +26,23 @@ use chrono::Utc;
 use foundry_core::agents::AgentIngestObserver;
 use foundry_core::bay::BayMap;
 use foundry_core::eventlog::EventLog;
+use foundry_core::export::build_floor_state;
 use foundry_core::heartbeat::HeartbeatObserver;
+use foundry_core::httpd::{self, ServedState};
 use foundry_core::local::{GitObserver, LocalClaudeObserver};
 use foundry_core::observer::{Observer, RemoteClaudeObserver, SyntheticCanary};
 use foundry_core::persist::{self, LoadOutcome};
 use foundry_core::reducer::StateStore;
 use foundry_core::render::{render_audit, render_floor};
 use foundry_core::transport::FileTransportReceiver;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
+use std::io::Write;
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 struct Args {
@@ -61,6 +69,15 @@ struct Args {
     /// Paired with `FOUNDRY_AGENT_KEY` in the environment for the
     /// single-key case: `--agent-key-id NAME` + `FOUNDRY_AGENT_KEY=...`.
     agent_key_id: Option<String>,
+    /// L-01: path to atomically write the exported `FloorState` JSON to,
+    /// each poll cycle. `None` means don't export at all.
+    state_json: Option<PathBuf>,
+    /// L-01: `host:port` (loopback only) to serve `/state` and `/health`
+    /// from, in a background thread. `None` means don't serve.
+    serve_addr: Option<SocketAddr>,
+    /// L-01: require a per-run random `X-Foundry-Token` header on every
+    /// `--serve` request.
+    serve_token: bool,
 }
 
 fn parse_args() -> Args {
@@ -78,6 +95,9 @@ fn parse_args() -> Args {
     let mut agent_ttl_secs = foundry_core::agents::DEFAULT_AGENT_TTL_SECS;
     let mut agent_keys_arg = None;
     let mut agent_key_id = None;
+    let mut state_json = None;
+    let mut serve_addr = None;
+    let mut serve_token = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -127,6 +147,23 @@ fn parse_args() -> Args {
             "--agent-key-id" => {
                 agent_key_id = Some(args.next().expect("--agent-key-id needs a value"))
             }
+            "--state-json" => {
+                state_json = Some(PathBuf::from(
+                    args.next().expect("--state-json needs a value"),
+                ))
+            }
+            "--serve" => {
+                let raw = args
+                    .next()
+                    .expect("--serve needs a value, e.g. 127.0.0.1:8787");
+                match raw.parse::<SocketAddr>() {
+                    Ok(addr) => serve_addr = Some(addr),
+                    Err(e) => {
+                        eprintln!("warning: invalid --serve address '{raw}': {e} — not serving")
+                    }
+                }
+            }
+            "--serve-token" => serve_token = true,
             other => eprintln!("warning: unrecognized argument '{other}', ignoring"),
         }
     }
@@ -145,7 +182,44 @@ fn parse_args() -> Args {
         agent_ttl_secs,
         agent_keys_arg,
         agent_key_id,
+        state_json,
+        serve_addr,
+        serve_token,
     }
+}
+
+/// A per-run pseudo-random token for `--serve-token` — no `rand` dependency
+/// in this crate, so this mixes wall-clock time, process id and a counter
+/// through `DefaultHasher`. Good enough to keep a stray localhost tab from
+/// guessing it; NOT a cryptographic secret.
+fn random_token() -> String {
+    let mut hasher = DefaultHasher::new();
+    std::time::SystemTime::now().hash(&mut hasher);
+    std::process::id().hash(&mut hasher);
+    std::ptr::addr_of!(hasher).hash(&mut hasher);
+    format!("{:016x}{:016x}", hasher.finish(), {
+        let mut h2 = DefaultHasher::new();
+        (hasher.finish(), "foundry-serve-token").hash(&mut h2);
+        h2.finish()
+    })
+}
+
+/// Atomically writes `json` to `path` (temp file in the same directory, then
+/// rename) — same pattern `persist::save_snapshot` uses, so a reader (the
+/// Pixi app polling the file, or another process) never observes a partial
+/// write.
+fn write_state_json_atomic(path: &std::path::Path, json: &str) -> std::io::Result<()> {
+    let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
+    if let Some(dir) = dir {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(json.as_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
 }
 
 /// Builds the key_id -> shared-secret map for verifying agent bundles, from
@@ -295,6 +369,34 @@ fn main() {
         }
     };
 
+    // L-01: --serve spins up the tiny loopback HTTP server once, sharing a
+    // `Mutex<String>` of the latest exported JSON with the poll loop below.
+    let served_state = args.serve_addr.map(|addr| {
+        let token = args.serve_token.then(random_token);
+        let state = ServedState {
+            json: Arc::new(Mutex::new(String::from("{}"))),
+            seq: Arc::new(AtomicU64::new(0)),
+            token: token.clone(),
+        };
+        match httpd::serve(addr, state.clone()) {
+            Ok(listener) => {
+                if let Some(t) = &token {
+                    eprintln!(
+                        "--serve: listening on {} (X-Foundry-Token required: {t})",
+                        listener.local_addr().unwrap_or(addr)
+                    );
+                } else {
+                    eprintln!(
+                        "--serve: listening on {}",
+                        listener.local_addr().unwrap_or(addr)
+                    );
+                }
+            }
+            Err(e) => eprintln!("warning: --serve failed to bind {addr}: {e} — not serving"),
+        }
+        state
+    });
+
     loop {
         let now = Utc::now();
 
@@ -347,6 +449,27 @@ fn main() {
         // cycle too, which trivially satisfies "every N cycles" for any N).
         if let Err(e) = persist::save_snapshot(&args.log_dir, &store, log.last_seq(), now) {
             eprintln!("warning: snapshot write failed: {e}");
+        }
+
+        // L-01: export the floor as JSON — to `--state-json` and/or the
+        // `--serve` HTTP server — from the SAME `store` the text renderer
+        // below reads, so the two can never disagree.
+        if args.state_json.is_some() || served_state.is_some() {
+            let floor = build_floor_state(&store, now, &bay_map, &log.ring_snapshot());
+            match serde_json::to_string(&floor) {
+                Ok(json) => {
+                    if let Some(path) = &args.state_json {
+                        if let Err(e) = write_state_json_atomic(path, &json) {
+                            eprintln!("warning: --state-json write failed: {e}");
+                        }
+                    }
+                    if let Some(served) = &served_state {
+                        *served.json.lock().unwrap() = json;
+                        served.seq.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+                Err(e) => eprintln!("warning: failed to serialize FloorState: {e}"),
+            }
         }
 
         let rendered = if args.audit {

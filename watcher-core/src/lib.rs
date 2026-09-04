@@ -1,8 +1,10 @@
 pub mod agents;
 pub mod bay;
 pub mod eventlog;
+pub mod export;
 pub mod health;
 pub mod heartbeat;
+pub mod httpd;
 pub mod local;
 pub mod observer;
 pub mod persist;

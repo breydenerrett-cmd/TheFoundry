@@ -93,7 +93,7 @@ pub enum EventKind {
 
 /// The twelve §6 health states, plus the four waiting/blocked splits from the
 /// pre-build amendments. A station's state is always exactly one of these.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StationState {
     Working,

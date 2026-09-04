@@ -611,6 +611,42 @@ impl StateStore {
         self.agent_seq_watermarks = watermarks;
     }
 
+    /// Marquee/export shared derivation: displayed-state counts across all
+    /// non-`gone` sessions. Both `render.rs`'s marquee line and
+    /// `export.rs`'s JSON are built from this SAME method so the two can
+    /// never silently disagree about how many sessions are in each state.
+    pub fn session_state_counts(&self) -> BTreeMap<StationState, u32> {
+        let mut counts = BTreeMap::new();
+        for rec in self.sessions.values() {
+            if rec.gone {
+                continue;
+            }
+            *counts.entry(rec.displayed_state.value).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    /// Count of routines confidently known to be overdue this poll — `stale`
+    /// (unverified) routines are excluded, matching the marquee line.
+    pub fn overdue_routines_count(&self) -> usize {
+        self.routines
+            .values()
+            .filter(|r| r.overdue && !r.stale)
+            .count()
+    }
+
+    /// The soonest-due enabled, non-stale, non-restored routine's
+    /// `(next_run_at, name)` — never a disabled/stale/restored one. Shared by
+    /// the marquee line and the JSON export so "next routine" can't diverge
+    /// between the two surfaces.
+    pub fn next_routine(&self) -> Option<(DateTime<Utc>, &str)> {
+        self.routines
+            .values()
+            .filter(|r| r.enabled && !r.stale && !r.restored)
+            .filter_map(|r| r.next_run_at.map(|t| (t, r.name.as_str())))
+            .min_by_key(|(t, _)| *t)
+    }
+
     pub fn last_sync_age_secs(&self, now: DateTime<Utc>) -> Option<i64> {
         self.pipeline
             .last_any_event_at

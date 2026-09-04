@@ -97,3 +97,10 @@
 - Modes COMMAND CENTER / PROJECT FOCUS / AMBIENT / INCIDENT / DEEP DEBUG (hotkeys 1–5, Esc), persisted; INCIDENT auto-enters only on *observed* FAILED / BREY_REQUIRED / >15 min overdue (inferred-only faults get an amber wash, never a takeover) and re-arms per distinct incident; AMBIENT drops chrome but never the PIPELINE/REMOTE ESTATE truth line; DEEP DEBUG lists redacted shape-only tape, observer capabilities, MACHINES. Carry-overs fixed: label collision avoidance (tested), glyph dispatch through the state table. Playwright 10 → **17**.
 - CI #11 green (Rust + web) after `default-run`. Remaining cuts → V-05: bay click-to-focus, real hue drift, autopilot test, mode indicator clips marquee line 2.
 - Sonnet worker ~145k tokens.
+
+## 2026-09-05T01:40Z — L-01 live bridge (watcher side)
+
+- `export.rs` builds a `FloorState` JSON matching `app/src/state.ts`, derived from the SAME reducer methods the text marquee now uses (`session_state_counts`, `overdue_routines_count`, `next_routine`) — text and JSON cannot disagree (tested). Output shelf exported as `unknown`/null everywhere: no artifact-velocity instrumentation exists yet, so it is never fabricated. Tape: ≤200 redacted shape-only rows.
+- `--state-json PATH` (atomic per poll) and `--serve 127.0.0.1:PORT` (dependency-free std::net HTTP: `/state`, `/health`, no-store, localhost-only CORS, optional `X-Foundry-Token`, refuses non-loopback binds). Live demo served real state at 127.0.0.1:8799.
+- Redactor: UUID-shaped local session ids were being scrubbed (breaking UI keying) — added an RFC-4122 exemption with a test that a real key still redacts. Tests 100 → **108**.
+- Sonnet worker ~167k tokens. V-05 running; L-01 app side next.

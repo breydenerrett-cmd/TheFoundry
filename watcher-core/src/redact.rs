@@ -72,7 +72,9 @@ pub fn scrub_secrets(input: &str) -> String {
             let m = &caps[0];
             let is_known_safe_id = KNOWN_SAFE_ID_PREFIXES.iter().any(|p| m.starts_with(p));
             let has_digit = m.chars().any(|c| c.is_ascii_digit());
-            if is_known_safe_id || !has_digit {
+            // RFC-4122-shaped UUIDs (local Claude session ids) are identifiers,
+            // not credentials — keep them so the UI can key stations by id.
+            if is_known_safe_id || !has_digit || is_uuid(m) {
                 m.to_string()
             } else {
                 "[REDACTED-SECRET]".to_string()
@@ -80,6 +82,28 @@ pub fn scrub_secrets(input: &str) -> String {
         })
         .into_owned();
     out
+}
+
+fn is_uuid(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 36
+        && b.iter().enumerate().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => *c == b'-',
+            _ => c.is_ascii_hexdigit(),
+        })
+}
+
+#[cfg(test)]
+mod uuid_tests {
+    use super::*;
+
+    #[test]
+    fn uuid_session_ids_survive_redaction_but_keys_do_not() {
+        let id = "a4cf9da4-74f5-5a3d-8a1a-c976f3512221";
+        assert_eq!(scrub_secrets(id), id);
+        let key = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefgh";
+        assert!(scrub_secrets(key).contains("[REDACTED"));
+    }
 }
 
 /// Truncate a routine prompt body. Per §15, routine prompts must never render
