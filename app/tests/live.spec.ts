@@ -112,19 +112,21 @@ test("live feed: real watcher drives data-feed=live, matches /state, then goes d
     const shell = page.locator(".app-shell");
     await expect(shell).toHaveAttribute("data-feed", "live", { timeout: 15_000 });
 
-    // At least one session sourced from the live watcher shows up — the
-    // current local Claude session, inferred WORKING.
-    const mirrorRows = page.locator("#scene-mirror div[data-station-id]");
-    await expect(mirrorRows).not.toHaveCount(0, { timeout: 10_000 });
-
+    // The floor must mirror exactly what the watcher reports — including an
+    // honestly EMPTY estate. On a dev box the current local Claude session
+    // shows up (inferred WORKING); on a CI runner there is no `claude` CLI,
+    // so zero stations is the truth and must render as zero, not as a
+    // fixture or an invented station.
     const stateRes = await fetch(`http://127.0.0.1:${port}/state`);
     const liveState = await stateRes.json();
-    expect(liveState.sessions.length).toBeGreaterThan(0);
-
-    const firstId = liveState.sessions[0].id;
-    const row = page.locator(`#scene-mirror div[data-station-id="${firstId}"]`);
-    await expect(row).toHaveCount(1);
-    await expect(row).toHaveAttribute("data-state", liveState.sessions[0].state);
+    const mirrorRows = page.locator("#scene-mirror div[data-station-id]");
+    await expect(mirrorRows).toHaveCount(liveState.sessions.length, { timeout: 10_000 });
+    if (liveState.sessions.length > 0) {
+      const firstId = liveState.sessions[0].id;
+      const row = page.locator(`#scene-mirror div[data-station-id="${firstId}"]`);
+      await expect(row).toHaveCount(1);
+      await expect(row).toHaveAttribute("data-state", liveState.sessions[0].state);
+    }
 
     // Marquee PIPELINE / REMOTE ESTATE lines match /state's pipeline fields.
     const marqueeText = await page.locator(".marquee").innerText();
