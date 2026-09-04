@@ -120,7 +120,11 @@ impl ObserverHealth {
 
     pub fn record_failure(&mut self, error: impl Into<String>) {
         self.consecutive_failures += 1;
-        self.last_error = Some(error.into());
+        // §15: `last_error` is rendered/snapshotted verbatim (the floor and
+        // `--audit` both print it) — route it through the same redaction
+        // boundary every other free-text field crosses before it can carry
+        // a path, email, or accidentally-pasted secret out.
+        self.last_error = Some(crate::redact::redact_field(&error.into()));
         // This poll confirmed NOTHING — `capabilities` must reflect that,
         // not silently keep last poll's now-stale value. Leaving the old
         // (non-empty) capability set in place was a real bug: the reducer's

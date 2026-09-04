@@ -57,8 +57,14 @@ pub trait Publisher {
 pub trait Receiver {
     /// Returns every envelope newly available since the last call. Must
     /// never re-return an envelope already handed back — callers rely on
-    /// `drain()` being a one-shot consuming read of "what's new".
-    fn drain(&mut self) -> Vec<SignedBundle>;
+    /// `drain()` being a one-shot consuming read of "what's new". `Err`
+    /// means the transport itself could not be read at all this call (e.g.
+    /// its directory is missing/unreadable) — distinct from "readable but
+    /// empty" (`Ok(vec![])`), so a caller can tell "confirmed nothing new"
+    /// apart from "couldn't check" (adversarial finding F-7: this used to
+    /// be indistinguishable, so an unreadable transport still reported the
+    /// `agents` observer as HEALTHY).
+    fn drain(&mut self) -> Result<Vec<SignedBundle>>;
 }
 
 /// Agent-side `Publisher`: appends one JSON line per publish to
@@ -110,11 +116,14 @@ impl FileTransportReceiver {
 }
 
 impl Receiver for FileTransportReceiver {
-    fn drain(&mut self) -> Vec<SignedBundle> {
+    fn drain(&mut self) -> Result<Vec<SignedBundle>> {
         let mut out = Vec::new();
-        let Ok(entries) = fs::read_dir(&self.dir) else {
-            return out;
-        };
+        let entries = fs::read_dir(&self.dir).map_err(|e| {
+            format!(
+                "could not read agent transport directory {}: {e}",
+                self.dir.display()
+            )
+        })?;
         let mut paths: Vec<PathBuf> = entries
             .filter_map(|e| e.ok())
             .map(|e| e.path())
@@ -146,7 +155,7 @@ impl Receiver for FileTransportReceiver {
             }
             self.offsets.insert(path, bytes.len() as u64);
         }
-        out
+        Ok(out)
     }
 }
 
@@ -169,14 +178,14 @@ mod tests {
         let mut receiver = FileTransportReceiver::new(dir.path());
 
         publisher.publish(sb(1)).unwrap();
-        let first = receiver.drain();
+        let first = receiver.drain().unwrap();
         assert_eq!(first.len(), 1);
 
         // No new publishes — a second drain must be empty, not re-deliver.
-        assert!(receiver.drain().is_empty());
+        assert!(receiver.drain().unwrap().is_empty());
 
         publisher.publish(sb(2)).unwrap();
-        let second = receiver.drain();
+        let second = receiver.drain().unwrap();
         assert_eq!(second.len(), 1);
         assert!(second[0].bundle_json.contains('2'));
     }
@@ -190,7 +199,7 @@ mod tests {
         mac.publish(sb(2)).unwrap();
 
         let mut receiver = FileTransportReceiver::new(dir.path());
-        let all = receiver.drain();
+        let all = receiver.drain().unwrap();
         assert_eq!(all.len(), 2);
     }
 }

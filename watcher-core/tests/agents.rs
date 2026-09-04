@@ -185,7 +185,15 @@ fn tampered_bundle_is_rejected_and_no_sessions_ingest() {
 
     let rows = ingest.machines(now);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].agent_id, "pc");
+    // F-9 fix: a bundle whose SIGNATURE has not verified carries an
+    // UNVERIFIED `agent_id` claim — attributing the rejection to that
+    // claimed "pc" would let an unauthenticated writer fabricate an
+    // arbitrary machine's row (e.g. paint over a real "pc" agent's status,
+    // or invent one that never existed). It is bucketed under the fixed
+    // "unverified" row instead; only a bundle whose signature actually
+    // verifies (see `replayed_seq_is_rejected_end_to_end` below) has an
+    // authenticated agent_id worth keying a row by.
+    assert_eq!(rows[0].agent_id, foundry_core::agents::UNVERIFIED_BUCKET);
     assert_eq!(rows[0].status, MachineStatus::Unreachable);
     assert!(rows[0].reason.as_deref().unwrap().contains("signature"));
 
@@ -193,7 +201,10 @@ fn tampered_bundle_is_rejected_and_no_sessions_ingest() {
     store.apply_events(&events, now);
     store.set_machines(rows);
     assert!(store.sessions.is_empty());
-    assert_eq!(store.machines["pc"].status, MachineStatus::Unreachable);
+    assert_eq!(
+        store.machines[foundry_core::agents::UNVERIFIED_BUCKET].status,
+        MachineStatus::Unreachable
+    );
 }
 
 /// (c) wrong key -> rejected.
@@ -337,4 +348,198 @@ fn secret_in_label_never_reaches_the_transport_file() {
         !file_contents.contains("sk-abcdefghij1234567890"),
         "an API-key-shaped secret must never reach the on-disk transport file: {file_contents}"
     );
+}
+
+/// (g) F-8: a key_id bound to one agent_id must not authenticate a bundle
+/// claiming to be a DIFFERENT agent_id, even though the signature itself is
+/// perfectly valid (both agents are handed the same shared secret in this
+/// scenario — e.g. a leaked/shared key file).
+#[test]
+fn key_bound_to_one_agent_id_rejects_a_bundle_claiming_another() {
+    let dir = tempfile::tempdir().unwrap();
+    let secret = b"shared-secret";
+    let now = Utc::now();
+
+    // "pc"'s key gets used to sign a bundle that claims to be "laptop" —
+    // exactly what a compromised/misdirected agent process would produce.
+    let bundle = make_bundle(
+        "laptop",
+        1,
+        now,
+        vec![session_event("s1", "laptop", "work", now)],
+    );
+    let mut publisher = FileTransportPublisher::new(dir.path(), "laptop").unwrap();
+    sign_and_publish(&mut publisher, &bundle, secret, "k-pc");
+
+    let mut bindings = BTreeMap::new();
+    bindings.insert("k-pc".to_string(), "pc".to_string());
+    let mut ingest = AgentIngestObserver::new(
+        Box::new(FileTransportReceiver::new(dir.path())),
+        keyring("k-pc", secret),
+        120,
+    )
+    .with_key_bindings(bindings);
+
+    let events = ingest.poll(now);
+    assert!(
+        events.is_empty(),
+        "a key_id bound to a different agent_id must not be ingested"
+    );
+    let rows = ingest.machines(now);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].agent_id, "laptop");
+    assert_eq!(rows[0].status, MachineStatus::Unreachable);
+    assert!(rows[0]
+        .reason
+        .as_deref()
+        .unwrap()
+        .contains("not authorized"));
+}
+
+/// (h) F-8: the SAME key_id, correctly claiming the agent_id it's bound to,
+/// still authenticates normally — binding must not break the ordinary case.
+#[test]
+fn key_bound_to_its_own_agent_id_still_authenticates() {
+    let dir = tempfile::tempdir().unwrap();
+    let secret = b"shared-secret";
+    let now = Utc::now();
+
+    let bundle = make_bundle("pc", 1, now, vec![session_event("s1", "pc", "work", now)]);
+    let mut publisher = FileTransportPublisher::new(dir.path(), "pc").unwrap();
+    sign_and_publish(&mut publisher, &bundle, secret, "k-pc");
+
+    let mut bindings = BTreeMap::new();
+    bindings.insert("k-pc".to_string(), "pc".to_string());
+    let mut ingest = AgentIngestObserver::new(
+        Box::new(FileTransportReceiver::new(dir.path())),
+        keyring("k-pc", secret),
+        120,
+    )
+    .with_key_bindings(bindings);
+
+    let events = ingest.poll(now);
+    assert_eq!(events.len(), 1);
+    assert_eq!(ingest.machines(now)[0].status, MachineStatus::Reachable);
+}
+
+/// (i) F-9: an UNKNOWN key_id (no signature could even be checked) is
+/// bucketed under the fixed "unverified" row, never under whatever agent_id
+/// the unauthenticated bundle JSON happens to claim.
+#[test]
+fn unknown_key_id_is_bucketed_as_unverified_not_the_claimed_agent_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Utc::now();
+
+    // Claims to be the well-known "pc" machine, signed with a key_id main
+    // never configured at all.
+    let bundle = make_bundle("pc", 1, now, vec![session_event("s1", "pc", "work", now)]);
+    let mut publisher = FileTransportPublisher::new(dir.path(), "pc").unwrap();
+    sign_and_publish(&mut publisher, &bundle, b"whatever", "nope");
+
+    let mut ingest = AgentIngestObserver::new(
+        Box::new(FileTransportReceiver::new(dir.path())),
+        keyring("k1", b"secret"),
+        120,
+    );
+    ingest.poll(now);
+    let rows = ingest.machines(now);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].agent_id,
+        foundry_core::agents::UNVERIFIED_BUCKET,
+        "an unauthenticated bundle must not be able to fabricate a row under its claimed agent_id"
+    );
+    assert_ne!(
+        rows[0].agent_id, "pc",
+        "the real 'pc' agent's row must not be created/overwritten by an unverified claim"
+    );
+}
+
+/// (j) F-10: a rejection reason containing secret-shaped text (an email, a
+/// path) is redacted before it is stored/rendered — `ObserverHealth` and
+/// `MachineRecord.reason` are both rendered verbatim by `render_floor`.
+#[test]
+fn rejection_reason_is_redacted_before_it_is_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = Utc::now();
+
+    // The key_id itself is attacker-controlled (it's read straight off the
+    // wire before any verification) — smuggle secret-shaped text into it.
+    let leaking_key_id = "leak-breydenerrett@gmail.com";
+    let bundle = make_bundle("pc", 1, now, vec![session_event("s1", "pc", "work", now)]);
+    let mut publisher = FileTransportPublisher::new(dir.path(), "pc").unwrap();
+    sign_and_publish(&mut publisher, &bundle, b"whatever", leaking_key_id);
+
+    let mut ingest = AgentIngestObserver::new(
+        Box::new(FileTransportReceiver::new(dir.path())),
+        keyring("k1", b"secret"),
+        120,
+    );
+    ingest.poll(now);
+    let rows = ingest.machines(now);
+    let reason = rows[0].reason.as_deref().unwrap();
+    assert!(
+        !reason.contains("breydenerrett@gmail.com"),
+        "a rejection reason must be redacted before it is stored/rendered: {reason}"
+    );
+}
+
+/// (k) F-11: `agent_id -> last accepted seq` survives a restart via
+/// `StateStore::agent_seq_watermarks`, so a fresh `AgentIngestObserver`
+/// seeded from it refuses a replay of the last-ever-accepted seq — not just
+/// bare `seq == 0` (that narrower guarantee is `replayed_seq_zero_bundle_
+/// must_not_resurrect_a_dead_machine` in `tests/opus_review.rs`).
+#[test]
+fn seq_watermark_survives_restart_and_still_rejects_a_replay() {
+    let dir = tempfile::tempdir().unwrap();
+    let secret = b"shared-secret";
+    let now = Utc::now();
+
+    let mut publisher = FileTransportPublisher::new(dir.path(), "pc").unwrap();
+    let bundle = make_bundle("pc", 7, now, vec![session_event("s1", "pc", "work", now)]);
+    sign_and_publish(&mut publisher, &bundle, secret, "k1");
+
+    let mut store = StateStore::new();
+    {
+        let mut ingest = AgentIngestObserver::new(
+            Box::new(FileTransportReceiver::new(dir.path())),
+            keyring("k1", secret),
+            120,
+        );
+        let events = ingest.poll(now);
+        assert_eq!(events.len(), 1);
+        store.set_agent_seq_watermarks(ingest.seq_watermarks());
+        assert_eq!(store.agent_seq_watermarks.get("pc"), Some(&7));
+        // `ingest` (and its in-memory replay guard) is dropped here — a
+        // brand new process would start with nothing but `store`.
+    }
+
+    // A byte-identical envelope (seq 7 again) is replayed after "restart".
+    publisher
+        .publish({
+            let bundle_json = serde_json::to_string(&bundle).unwrap();
+            let sig_hex = sign::sign_hex(secret, bundle_json.as_bytes());
+            SignedBundle {
+                bundle_json,
+                sig_hex,
+                key_id: "k1".to_string(),
+            }
+        })
+        .unwrap();
+
+    let mut fresh_ingest = AgentIngestObserver::new(
+        Box::new(FileTransportReceiver::new(dir.path())),
+        keyring("k1", secret),
+        120,
+    );
+    fresh_ingest.restore_seq_watermarks(&store.agent_seq_watermarks);
+    let later = now + Duration::seconds(5);
+    let events = fresh_ingest.poll(later);
+    assert!(
+        events.is_empty(),
+        "a restart-seeded watermark must still reject a replay of the last-accepted seq"
+    );
+    let rows = fresh_ingest.machines(later);
+    assert_eq!(rows[0].status, MachineStatus::Unreachable);
+    assert!(rows[0].reason.as_deref().unwrap().contains("replayed"));
 }

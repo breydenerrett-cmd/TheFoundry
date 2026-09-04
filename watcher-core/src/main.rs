@@ -153,19 +153,39 @@ fn parse_args() -> Args {
 /// `FOUNDRY_AGENT_KEY` environment variable. The secret is read ONLY from a
 /// file or that env var — never accepted as a bare CLI argument value, and
 /// never logged.
+/// F-8: `--agent-keys` accepts two shapes per comma-separated entry:
+///   - `id=path` (original, unrestricted — key_id `id` may sign for any
+///     agent_id, exactly as before);
+///   - `agent_id=key_id=path` (bound — key_id `key_id` may ONLY sign bundles
+///     that claim `agent_id`; a mismatch is rejected, visibly, by
+///     `AgentIngestObserver`).
+///
+/// Returns the keyring plus the key_id -> agent_id binding map — key_ids
+/// never bound via the 2-part form are left unrestricted.
 fn build_agent_keyring(
     agent_keys_arg: &Option<String>,
     agent_key_id: &Option<String>,
-) -> BTreeMap<String, Vec<u8>> {
+) -> (BTreeMap<String, Vec<u8>>, BTreeMap<String, String>) {
     let mut map = BTreeMap::new();
+    let mut bindings = BTreeMap::new();
     if let Some(spec) = agent_keys_arg {
         for pair in spec.split(',') {
             let pair = pair.trim();
             if pair.is_empty() {
                 continue;
             }
-            match pair.split_once('=') {
-                Some((id, path)) => match std::fs::read_to_string(path) {
+            let parts: Vec<&str> = pair.splitn(3, '=').collect();
+            match parts.as_slice() {
+                [agent_id, key_id, path] => match std::fs::read_to_string(path) {
+                    Ok(secret) => {
+                        map.insert(key_id.to_string(), secret.trim().as_bytes().to_vec());
+                        bindings.insert(key_id.to_string(), agent_id.to_string());
+                    }
+                    Err(e) => eprintln!(
+                        "warning: could not read agent key file '{path}' for key_id '{key_id}' (agent '{agent_id}'): {e}"
+                    ),
+                },
+                [id, path] => match std::fs::read_to_string(path) {
                     Ok(secret) => {
                         map.insert(id.to_string(), secret.trim().as_bytes().to_vec());
                     }
@@ -173,9 +193,9 @@ fn build_agent_keyring(
                         "warning: could not read agent key file '{path}' for key_id '{id}': {e}"
                     ),
                 },
-                None => {
-                    eprintln!("warning: malformed --agent-keys entry '{pair}', expected id=path")
-                }
+                _ => eprintln!(
+                    "warning: malformed --agent-keys entry '{pair}', expected id=path or agent_id=key_id=path"
+                ),
             }
         }
     }
@@ -189,7 +209,7 @@ fn build_agent_keyring(
             ),
         }
     }
-    map
+    (map, bindings)
 }
 
 fn main() {
@@ -204,12 +224,13 @@ fn main() {
         .map(|d| HeartbeatObserver::new(d, args.heartbeat_label.clone()));
     let mut canary = SyntheticCanary::new();
     let mut agent_ingest = args.agents_dir.as_ref().map(|dir| {
-        let keyring = build_agent_keyring(&args.agent_keys_arg, &args.agent_key_id);
+        let (keyring, bindings) = build_agent_keyring(&args.agent_keys_arg, &args.agent_key_id);
         AgentIngestObserver::new(
             Box::new(FileTransportReceiver::new(dir)),
             keyring,
             args.agent_ttl_secs,
         )
+        .with_key_bindings(bindings)
     });
     let mut log =
         EventLog::new(&args.log_dir, 50_000, 30).expect("failed to open event log directory");
@@ -255,6 +276,13 @@ fn main() {
             }
         }
     };
+
+    // F-11: seed the agent replay guard from whatever watermark survived in
+    // the snapshot — otherwise a restart reopens the seq replay window for
+    // every previously-known agent, not just seq 0 (F-3).
+    if let Some(ai) = &mut agent_ingest {
+        ai.restore_seq_watermarks(&store.agent_seq_watermarks);
+    }
 
     let bay_map = match BayMap::load(&args.bay_map_path) {
         Ok(map) => map,
@@ -307,6 +335,7 @@ fn main() {
         if let Some(ai) = &agent_ingest {
             store.apply_observer_health(ai.health(), now, None, None);
             store.set_machines(ai.machines(now));
+            store.set_agent_seq_watermarks(ai.seq_watermarks());
         }
 
         if let Err(e) = log.append(&all_events) {

@@ -80,3 +80,10 @@
 - `src/states.ts` is now the single state→{color, light, motion, glyph, beacon} table; `restored` forces STALE treatment regardless of state. Fit-to-viewport layout (content-only bounds, ~92% fill, tested at 1280×720 and 1920×1080 via `data-scene-bounds`), 3×3 bay grid, gradient/rim-light/scanline/furniture pass. `floor-states.json` fixture with all 13 states + inferred + restored. Playwright 8 → **10**.
 - Carry-over into V-04: label collisions at small stations; glyph drawing still uses the old switch, not `spec.glyph`.
 - Sonnet worker ~156k tokens. O-01 fixer running in watcher-core.
+
+## 2026-09-05T00:45Z — O-01 adversarial review + fixes
+
+- Opus (single authorized use, ~125k tokens) confirmed 7 lies with failing tests (`tests/opus_review.rs`): stale-log replay after restart rendered WORKING; future-dated heartbeat fabricated `LAST OUTPUT 0s`; seq-0 agent bundle replayable forever (dead machine → REACHABLE); Degraded observer with empty capabilities still "pipeline verified"; any source's heartbeat certified the canary and un-restored the floor; stale routine advertised as NEXT; agents observer HEALTHY with an unreadable transport dir.
+- Sonnet fixer (~224k tokens) fixed all 7 + security hardening: key_id↔agent_id binding (`--agent-keys agent_id=key_id=path`), unverified rejections bucketed as "unverified" not the claimed id, `last_error`/rejection reasons redacted before storage, per-agent seq watermarks persisted in the snapshot, `last_heard_at` from `sent_at`. One existing test was corrected because it asserted the vulnerable behavior.
+- Judgment call recorded: the `last_seq()` off-by-one Opus flagged was NOT changed — fixer traced main.rs and found snapshot-save always follows log-append, and the persistence test locks the exclusive bound intentionally. Revisit if the poll loop ever changes.
+- Tests 88 → **100**; clippy/fmt clean; both binaries build.

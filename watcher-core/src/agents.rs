@@ -8,12 +8,25 @@
 
 use crate::health::{CapabilitySet, ObserverHealth};
 use crate::observer::Observer;
+use crate::redact::redact_field;
 use crate::reducer::{MachineRecord, MachineStatus};
 use crate::schema::Event;
 use crate::sign;
 use crate::transport::{AgentBundle, Receiver, SignedBundle};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
+
+/// F-9: the bucket a rejection is attributed to BEFORE the bundle's
+/// signature has verified — an unauthenticated writer can put whatever it
+/// wants in the `agent_id` field of a bundle it never signed correctly, so
+/// keying the MACHINES row on that claimed-but-unverified value would let
+/// it fabricate an arbitrary machine's row (rename a dead/nonexistent
+/// machine, or paint over a real one under a name it doesn't own). Every
+/// pre-signature-verification rejection (unknown key_id, bad signature,
+/// unparseable bundle) is attributed here instead; only once the signature
+/// has actually verified is `bundle.agent_id` trustworthy enough to key a
+/// row by.
+pub const UNVERIFIED_BUCKET: &str = "unverified";
 
 /// Bundles whose `sent_at` is more than this far from "now" (either
 /// direction) are rejected — a stale replay dressed up with a fresh `seq`,
@@ -31,7 +44,13 @@ pub const DEFAULT_AGENT_TTL_SECS: i64 = 120;
 #[derive(Debug, Clone, Default)]
 struct AgentState {
     last_heard_at: Option<DateTime<Utc>>,
-    last_seq: u64,
+    /// F-3: `None` means "no bundle from this agent has ever been accepted"
+    /// — distinct from `Some(0)`, a genuine, already-accepted `seq == 0`.
+    /// The old `u64` (implicitly starting at 0) could not tell those apart,
+    /// so a bundle carrying `seq == 0` never tripped the replay guard
+    /// (`prior_seq > 0 && seq <= prior_seq`) and could be re-published
+    /// forever to resurrect a dead machine.
+    last_seq: Option<u64>,
     capabilities: Vec<String>,
     /// Reason the MOST RECENT bundle from this agent (if any) was rejected.
     /// Cleared on the next successfully-verified bundle.
@@ -45,6 +64,15 @@ struct AgentState {
 pub struct AgentIngestObserver {
     receiver: Box<dyn Receiver>,
     keyring: BTreeMap<String, Vec<u8>>,
+    /// F-8: which agent_id a given key_id is authorized to sign for. Empty
+    /// (the default, and every pre-existing caller of `new`) means no
+    /// binding is enforced — backward compatible with configurations that
+    /// only ever hand out one key_id per deployment. When a key_id IS bound
+    /// here, a signature that verifies under it but claims a DIFFERENT
+    /// agent_id is rejected as a visible degradation rather than silently
+    /// accepted: a shared secret does not, by itself, prove which machine is
+    /// allowed to publish under which name.
+    key_bindings: BTreeMap<String, String>,
     ttl_secs: i64,
     clock_skew_secs: i64,
     agents: BTreeMap<String, AgentState>,
@@ -60,6 +88,7 @@ impl AgentIngestObserver {
         Self {
             receiver,
             keyring,
+            key_bindings: BTreeMap::new(),
             ttl_secs,
             clock_skew_secs: DEFAULT_CLOCK_SKEW_SECS,
             agents: BTreeMap::new(),
@@ -67,43 +96,92 @@ impl AgentIngestObserver {
         }
     }
 
-    /// Best-effort peek at `agent_id` inside `bundle_json`, purely so a
-    /// rejection can still be labeled with the right agent row — this value
-    /// is NEVER treated as verified; the signature check above every call
-    /// site of this happens (or is skipped because it already failed) is
-    /// what actually establishes trust.
-    fn peek_agent_id(bundle_json: &str) -> Option<String> {
-        let v: serde_json::Value = serde_json::from_str(bundle_json).ok()?;
-        v.get("agent_id")?.as_str().map(|s| s.to_string())
+    /// F-8: binds each `key_id` to the single `agent_id` it may sign for.
+    /// Builder-style so existing call sites (unbound — any agent_id may use
+    /// any key_id it holds the secret for) don't need to change.
+    pub fn with_key_bindings(mut self, bindings: BTreeMap<String, String>) -> Self {
+        self.key_bindings = bindings;
+        self
     }
 
     fn reject(&mut self, agent_id_hint: &str, reason: String) {
         let entry = self.agents.entry(agent_id_hint.to_string()).or_default();
-        entry.last_error = Some(reason);
+        // §15/F-10: rejection reasons are rendered/snapshotted verbatim
+        // (MACHINES section, `--audit`) — never trust a writer's own
+        // key_id/agent_id/JSON-error text without scrubbing it first.
+        entry.last_error = Some(redact_field(&reason));
+    }
+
+    /// F-11: exports the current `agent_id -> last accepted seq` watermark
+    /// for every agent this observer has ever accepted a bundle from, so the
+    /// caller can persist it (see `StateStore::agent_seq_watermarks`) and
+    /// hand it back via `restore_seq_watermarks` after a restart — otherwise
+    /// a restart reopens the whole replay window (F-3) for every agent, not
+    /// just seq 0.
+    pub fn seq_watermarks(&self) -> BTreeMap<String, u64> {
+        self.agents
+            .iter()
+            .filter_map(|(id, s)| s.last_seq.map(|seq| (id.clone(), seq)))
+            .collect()
+    }
+
+    /// F-11: seeds this observer's replay guard from a persisted watermark
+    /// (loaded from a snapshot) BEFORE the first `poll()` — never lowers an
+    /// already-known watermark, only raises it.
+    pub fn restore_seq_watermarks(&mut self, watermarks: &BTreeMap<String, u64>) {
+        for (id, seq) in watermarks {
+            let entry = self.agents.entry(id.clone()).or_default();
+            if entry.last_seq.is_none_or(|cur| *seq > cur) {
+                entry.last_seq = Some(*seq);
+            }
+        }
     }
 
     /// Verifies one envelope end to end. Returns the bundle's events only if
     /// every check passes; otherwise records the rejection reason against
     /// the best-known agent id and returns nothing.
     fn verify_and_apply(&mut self, signed: &SignedBundle, now: DateTime<Utc>) -> Vec<Event> {
-        let hint =
-            Self::peek_agent_id(&signed.bundle_json).unwrap_or_else(|| "unknown".to_string());
-
+        // F-9: everything up to a verified signature is attacker-controlled
+        // input — `signed.key_id` and anything inside `bundle_json`
+        // (including its claimed `agent_id`) are NOT trustworthy yet, so
+        // rejections here must never key a MACHINES row off them.
         let Some(secret) = self.keyring.get(&signed.key_id) else {
-            self.reject(&hint, format!("unknown key_id '{}'", signed.key_id));
+            self.reject(
+                UNVERIFIED_BUCKET,
+                format!("unknown key_id '{}'", redact_field(&signed.key_id)),
+            );
             return Vec::new();
         };
         if !sign::verify(secret, signed.bundle_json.as_bytes(), &signed.sig_hex) {
-            self.reject(&hint, "bad signature".to_string());
+            self.reject(UNVERIFIED_BUCKET, "bad signature".to_string());
             return Vec::new();
         }
         let bundle: AgentBundle = match serde_json::from_str(&signed.bundle_json) {
             Ok(b) => b,
             Err(e) => {
-                self.reject(&hint, format!("malformed bundle: {e}"));
+                self.reject(UNVERIFIED_BUCKET, format!("malformed bundle: {e}"));
                 return Vec::new();
             }
         };
+
+        // F-8: the signature is now known-good for `signed.key_id`, but that
+        // alone doesn't say WHICH agent_id it's allowed to publish as — a
+        // key_id bound to one machine must not be able to sign bundles that
+        // claim to be a different one.
+        if let Some(expected) = self.key_bindings.get(&signed.key_id) {
+            if expected != &bundle.agent_id {
+                self.reject(
+                    &bundle.agent_id,
+                    format!(
+                        "key_id '{}' is not authorized for agent_id '{}'",
+                        redact_field(&signed.key_id),
+                        redact_field(&bundle.agent_id)
+                    ),
+                );
+                return Vec::new();
+            }
+        }
+
         let skew = (now - bundle.sent_at).num_seconds().abs();
         if skew > self.clock_skew_secs {
             self.reject(
@@ -112,17 +190,15 @@ impl AgentIngestObserver {
             );
             return Vec::new();
         }
-        let prior_seq = self
-            .agents
-            .get(&bundle.agent_id)
-            .map(|a| a.last_seq)
-            .unwrap_or(0);
-        if prior_seq > 0 && bundle.seq <= prior_seq {
-            self.reject(
-                &bundle.agent_id,
-                format!("replayed seq {} (last seen {prior_seq})", bundle.seq),
-            );
-            return Vec::new();
+        let prior_seq = self.agents.get(&bundle.agent_id).and_then(|a| a.last_seq);
+        if let Some(prior) = prior_seq {
+            if bundle.seq <= prior {
+                self.reject(
+                    &bundle.agent_id,
+                    format!("replayed seq {} (last seen {prior})", bundle.seq),
+                );
+                return Vec::new();
+            }
         }
 
         let caps: Vec<String> = bundle
@@ -131,8 +207,10 @@ impl AgentIngestObserver {
             .flat_map(|h| h.capabilities.0.iter().cloned())
             .collect();
         let entry = self.agents.entry(bundle.agent_id.clone()).or_default();
-        entry.last_heard_at = Some(now);
-        entry.last_seq = bundle.seq;
+        // F-11: the agent's own report of when it sent this bundle, not when
+        // WE happened to poll and drain it — polling is not observation.
+        entry.last_heard_at = Some(bundle.sent_at);
+        entry.last_seq = Some(bundle.seq);
         entry.capabilities = caps;
         entry.last_error = None;
 
@@ -180,14 +258,24 @@ impl Observer for AgentIngestObserver {
     }
 
     fn poll(&mut self, now: DateTime<Utc>) -> Vec<Event> {
-        let bundles = self.receiver.drain();
+        // F-7: this observer's own health is about whether the transport
+        // itself was readable at all — per-agent authenticity is a separate
+        // axis, reported through `machines()` / the MACHINES section
+        // instead. An unreadable transport (missing/misconfigured
+        // `--agents-dir`) must record_failure, not the unconditional
+        // record_success this used to be — otherwise a directory nothing
+        // can ever be received from still painted a green HEALTHY row.
+        let bundles = match self.receiver.drain() {
+            Ok(b) => b,
+            Err(e) => {
+                self.health.record_failure(e);
+                return Vec::new();
+            }
+        };
         let mut events = Vec::new();
         for signed in &bundles {
             events.extend(self.verify_and_apply(signed, now));
         }
-        // This observer's own health is about whether the transport itself
-        // was readable at all — per-agent authenticity is a separate axis,
-        // reported through `machines()` / the MACHINES section instead.
         self.health
             .record_success(now, CapabilitySet::from_iter(["agent_ingest"]));
         events

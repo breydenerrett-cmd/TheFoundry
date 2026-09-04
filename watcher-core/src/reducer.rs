@@ -194,6 +194,16 @@ pub struct StateStore {
     /// restored) across a snapshot load, matching `observer_health`.
     #[serde(default)]
     pub machines: BTreeMap<String, MachineRecord>,
+    /// F-11: the last-accepted `seq` this process has ever seen from each
+    /// agent_id (`agents::AgentIngestObserver::seq_watermarks()`). Unlike
+    /// `machines`/`observer_health`, this MUST survive a restart — it is
+    /// exactly what closes the replay window a fresh, watermark-less
+    /// `AgentIngestObserver` would otherwise reopen for every known agent
+    /// (the same class of bug as F-3, just re-triggered by a restart
+    /// instead of a bare `seq == 0`). `persist::mark_restored` deliberately
+    /// does NOT clear this field.
+    #[serde(default)]
+    pub agent_seq_watermarks: BTreeMap<String, u64>,
 }
 
 impl StateStore {
@@ -204,22 +214,21 @@ impl StateStore {
     pub fn apply_events(&mut self, events: &[Event], now: DateTime<Utc>) {
         for ev in events {
             self.pipeline.last_any_event_at = Some(now);
-            // S-01: a fresh event from anything but the synthetic canary is
-            // exactly what "at least one real observer produced a fresh
-            // event post-restart" means — the canary alone only proves the
-            // poll loop is alive, not that any real observer re-observed
-            // anything. Clearing this here (not just in the per-entity
-            // handlers below) also covers event kinds with no dedicated
-            // handler yet, so restored-floor state can't accidentally get
-            // stuck for a kind this match arm doesn't special-case.
-            if ev.source != "synthetic_canary" {
-                self.pipeline.restored_at = None;
-            }
             match ev.kind {
                 EventKind::Heartbeat => {
-                    self.pipeline.last_canary_at = Some(ev.ts);
+                    // S-01/F-5: only the in-process synthetic canary may
+                    // certify the local poll loop as alive — a Heartbeat
+                    // event forwarded from anywhere else (a remote agent
+                    // bundle, say) proves nothing about THIS process's own
+                    // loop and must not mint `last_canary_at`.
+                    if ev.source == crate::observer::CANARY_SOURCE {
+                        self.pipeline.last_canary_at = Some(ev.ts);
+                    }
                 }
-                EventKind::SessionObserved => self.apply_session_observed(ev, now),
+                EventKind::SessionObserved => {
+                    self.maybe_clear_restored_at(ev, now);
+                    self.apply_session_observed(ev, now);
+                }
                 EventKind::SessionGone => {
                     if let Some(rec) = self.sessions.get_mut(&ev.entity.id) {
                         if !rec.gone {
@@ -235,12 +244,38 @@ impl StateStore {
                 EventKind::RoutineScheduled | EventKind::RoutineOverdue => {
                     self.apply_routine(ev, now, ev.kind == EventKind::RoutineOverdue);
                 }
-                EventKind::WorktreeChanged => self.apply_check(ev, now),
+                EventKind::WorktreeChanged => {
+                    self.maybe_clear_restored_at(ev, now);
+                    self.apply_check(ev, now);
+                }
                 _ => {}
             }
         }
         self.derive_stalls(now);
         self.apply_ttls(now);
+    }
+
+    /// S-01/F-5 rule (kept in one place, not duplicated at each call site):
+    /// `pipeline.restored_at` is only cleared by a LOCAL, entity-bearing
+    /// observation — `SessionObserved` or `WorktreeChanged` — from a source
+    /// that isn't itself a coarse liveness signal (`heartbeat`) or the
+    /// synthetic canary. Rationale: proving the floor is live again requires
+    /// a real observer to have re-observed a real entity in THIS process,
+    /// not merely a heartbeat-shaped ping (which, like the canary, only
+    /// proves *something* is alive, not that any entity was re-observed).
+    fn maybe_clear_restored_at(&mut self, ev: &Event, now: DateTime<Utc>) {
+        if ev.source == "heartbeat" || ev.source == crate::observer::CANARY_SOURCE {
+            return;
+        }
+        // F-1: a replayed/backfilled event whose own timestamp already lies
+        // outside its trust window is not proof the floor is live again —
+        // only an observation that is itself fresh (by the same TTL rule
+        // `apply_session_observed`/`apply_ttls` use) may certify that.
+        let ttl = ev.ttl_secs.unwrap_or(DEFAULT_SESSION_TTL_SECS);
+        let age = (now - ev.ts).num_seconds();
+        if ttl <= 0 || age <= ttl {
+            self.pipeline.restored_at = None;
+        }
     }
 
     /// S-01 point 4: an observation older than its TTL must not keep the
@@ -284,6 +319,24 @@ impl StateStore {
             .elapsed_ms
             .map(|ms| now - chrono::Duration::milliseconds(ms));
 
+        // S-01/F-1: `last_polled_at` must be when this observation actually
+        // happened (`ev.ts`), not merely when THIS process happened to fold
+        // it in. Feeding a historical event log entry through `apply_events`
+        // at restart calls this with `now` = the restart's wall clock, which
+        // is hours or days after `ev.ts` for a replayed entry — using `now`
+        // here would re-anchor the record's freshness budget to "just
+        // observed", letting a day-old logged WORKING session render live
+        // again purely from being replayed. Never let a future-dated `ev.ts`
+        // count as "more recent than now" either.
+        let polled_at = ev.ts.min(now);
+        let ttl = ev.ttl_secs.unwrap_or(DEFAULT_SESSION_TTL_SECS);
+        // A replayed/backfilled event whose own timestamp is already outside
+        // its TTL window is not a fresh live observation — it must not clear
+        // `restored`/`restored_at` (that would un-mark a genuinely stale
+        // restored record as live) even though it still folds its state in
+        // for `apply_ttls` to immediately re-expire.
+        let is_fresh = ttl <= 0 || (now - polled_at).num_seconds() <= ttl;
+
         let entry = self
             .sessions
             .entry(ev.entity.id.clone())
@@ -298,29 +351,33 @@ impl StateStore {
                 model_last_served: None,
                 label: None,
                 session_kind: None,
-                last_polled_at: now,
-                last_activity_at: activity_at.unwrap_or(now),
+                last_polled_at: polled_at,
+                last_activity_at: activity_at.unwrap_or(polled_at),
                 stall_warning: false,
                 gone: false,
                 gone_at: None,
-                ttl_secs: ev.ttl_secs.unwrap_or(DEFAULT_SESSION_TTL_SECS),
+                ttl_secs: ttl,
                 restored: false,
                 restored_at: None,
             });
         entry.observed_state = Field::new(state, now, ev.fidelity);
         entry.displayed_state = Field::new(state, now, ev.fidelity);
         entry.source = ev.source.clone();
-        entry.last_polled_at = now;
+        entry.last_polled_at = polled_at;
         if let Some(a) = activity_at {
             entry.last_activity_at = a;
         }
         entry.gone = false;
         entry.gone_at = None;
-        entry.ttl_secs = ev.ttl_secs.unwrap_or(DEFAULT_SESSION_TTL_SECS);
+        entry.ttl_secs = ttl;
         // S-01: a fresh live observation for this entity means it is no
-        // longer a stale carry-over from a loaded snapshot.
-        entry.restored = false;
-        entry.restored_at = None;
+        // longer a stale carry-over from a loaded snapshot — but a replayed
+        // event that is itself already stale (see `is_fresh` above) must
+        // leave `restored`/`restored_at` exactly as they were.
+        if is_fresh {
+            entry.restored = false;
+            entry.restored_at = None;
+        }
         if ev.entity.parent_id.is_some() {
             entry.repo_hint = ev.entity.parent_id.clone();
         }
@@ -513,7 +570,10 @@ impl StateStore {
         // verified just because the canary is ticking and no observer
         // happens to be Down — the canary AND at least one real observer
         // must both have produced a fresh event in THIS process first.
-        canary_fresh && !self.any_real_observer_down() && self.pipeline.restored_at.is_none()
+        canary_fresh
+            && !self.any_real_observer_down()
+            && !self.any_real_observer_blind()
+            && self.pipeline.restored_at.is_none()
     }
 
     /// True if any observer other than the synthetic canary itself has gone
@@ -525,10 +585,30 @@ impl StateStore {
             .any(|h| h.name != "synthetic_canary" && matches!(h.status, ObserverStatus::Down))
     }
 
+    /// F-4: true if any real (non-canary) observer confirmed NOTHING this
+    /// poll — an empty `capabilities` set, whether the aggregate `status` is
+    /// `Down` (3 consecutive failures) or merely `Degraded` (1-2). A
+    /// Degraded-but-blind observer (e.g. two consecutive failures, still
+    /// short of Down) is just as unable to back up "pipeline verified" as a
+    /// fully Down one — `status` alone under-reports this.
+    pub fn any_real_observer_blind(&self) -> bool {
+        self.observer_health
+            .values()
+            .any(|h| h.name != "synthetic_canary" && h.capabilities.0.is_empty())
+    }
+
     /// Replaces the whole `MACHINES` view for this poll — called with
     /// `AgentIngestObserver::machines(now)`'s freshly-computed rows.
     pub fn set_machines(&mut self, rows: Vec<MachineRecord>) {
         self.machines = rows.into_iter().map(|r| (r.agent_id.clone(), r)).collect();
+    }
+
+    /// F-11: records this poll's `agents::AgentIngestObserver::seq_watermarks()`
+    /// so the next `save_snapshot` persists it and a restart can seed the
+    /// observer's replay guard via `restore_seq_watermarks` instead of
+    /// starting blank.
+    pub fn set_agent_seq_watermarks(&mut self, watermarks: BTreeMap<String, u64>) {
+        self.agent_seq_watermarks = watermarks;
     }
 
     pub fn last_sync_age_secs(&self, now: DateTime<Utc>) -> Option<i64> {

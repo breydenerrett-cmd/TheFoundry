@@ -99,7 +99,12 @@ pub fn render_floor(
     let next_routine = store
         .routines
         .values()
-        .filter(|r| r.enabled)
+        // F-6: `stale` (unverified this poll) and `restored` (carried over
+        // from a loaded snapshot) schedules must not be advertised as the
+        // estate's next scheduled run — only `enabled` was checked before,
+        // which let a frozen/unconfirmed `next_run_at` still headline the
+        // marquee.
+        .filter(|r| r.enabled && !r.stale && !r.restored)
         .filter_map(|r| r.next_run_at.map(|t| (t, &r.name)))
         .min_by_key(|(t, _)| *t)
         .map(|(t, name)| format!("{name} ({})", t.format("%H:%M UTC")))

@@ -136,6 +136,18 @@ pub const CAP_WORKTREE: &str = "worktree";
 pub const CAP_CONTEXT_USAGE: &str = "context_usage";
 pub const CAP_ROUTINES: &str = "routines";
 
+/// Stable `Event.source`/`ObserverHealth.name` for the in-process synthetic
+/// canary (see `SyntheticCanary` below) — the ONLY source allowed to mint
+/// `pipeline.last_canary_at` (adversarial finding: any Heartbeat-kind event,
+/// from any source including a forwarded agent bundle, used to be able to
+/// certify the local poll loop as alive).
+pub const CANARY_SOURCE: &str = "synthetic_canary";
+
+/// Clock-skew tolerance shared by every "is this timestamp plausible" check
+/// across observers (§16): a claimed time implausibly far in the future is
+/// treated as an unparseable/unknown timestamp, not as real freshness.
+pub const CLOCK_SKEW_TOLERANCE_SECS: i64 = 120;
+
 /// Reads redacted raw snapshots dropped into `feed_dir` by a bridge process
 /// (today: a Claude session with the Claude_Code_Remote MCP tools loaded).
 /// Expected files: `list_sessions.json`, `list_triggers.json` (same shape as
@@ -222,8 +234,6 @@ impl RemoteClaudeObserver {
     /// check in this observer (§16): a claimed time implausibly far in the
     /// future is treated as an unparseable/unknown timestamp, not as real
     /// freshness.
-    const CLOCK_SKEW_TOLERANCE_SECS: i64 = 120;
-
     /// Determines when the snapshot in `feed_dir` was actually CAPTURED, as
     /// opposed to when this poll happened to read it off disk. Truth bug fix:
     /// without this, a snapshot from days ago reads as "live" purely because
@@ -255,7 +265,7 @@ impl RemoteClaudeObserver {
             .or_else(|| from_json("list_sessions.json"))
             .or_else(|| from_json("list_triggers.json"))?;
 
-        if (captured_at - now).num_seconds() > Self::CLOCK_SKEW_TOLERANCE_SECS {
+        if (captured_at - now).num_seconds() > CLOCK_SKEW_TOLERANCE_SECS {
             None // implausibly far in the future — skewed clock, not real freshness
         } else {
             Some(captured_at)
@@ -298,7 +308,6 @@ impl Observer for RemoteClaudeObserver {
                 // reducer::apply_session_observed). Clock skew > 2min in
                 // either direction is treated the same way — an unparseable
                 // absolute-time claim, per §16.
-                const CLOCK_SKEW_TOLERANCE_SECS: i64 = 120;
                 let elapsed_ms = Self::parse_ts(&raw.updated_at).and_then(|updated_at| {
                     let delta = now - updated_at;
                     if delta.num_seconds() < -CLOCK_SKEW_TOLERANCE_SECS {
@@ -468,7 +477,7 @@ pub struct SyntheticCanary {
 impl SyntheticCanary {
     pub fn new() -> Self {
         Self {
-            health: ObserverHealth::new("synthetic_canary"),
+            health: ObserverHealth::new(CANARY_SOURCE),
         }
     }
 }
@@ -481,7 +490,7 @@ impl Default for SyntheticCanary {
 
 impl Observer for SyntheticCanary {
     fn name(&self) -> &str {
-        "synthetic_canary"
+        CANARY_SOURCE
     }
 
     fn poll(&mut self, now: DateTime<Utc>) -> Vec<Event> {

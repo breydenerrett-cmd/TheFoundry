@@ -21,7 +21,7 @@
 //! §15's defense-in-depth rule already applied to `--audit`).
 
 use crate::health::{CapabilitySet, ObserverHealth};
-use crate::observer::Observer;
+use crate::observer::{Observer, CLOCK_SKEW_TOLERANCE_SECS};
 use crate::schema::{EntityRef, EntityType, Event, EventKind, Fidelity, Metrics};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -133,8 +133,21 @@ impl Observer for HeartbeatObserver {
                 crate::local::empty_event(now, self.name(), EventKind::WorktreeChanged, entity);
             ev.label = Some(label);
             ev.fidelity = Fidelity::Observed;
+            // §16: a `ts` implausibly far in the future (clock skew, or a
+            // writer that lies) must not fabricate a fresh "0s ago" — clamp
+            // to `None` (unknown elapsed) exactly like every other "is this
+            // timestamp plausible" check in this crate (adversarial finding
+            // F-2), rather than `.max(0)`-clamping a negative delta to zero.
+            let elapsed_ms = ts.and_then(|t| {
+                let delta = now - t;
+                if delta.num_seconds() < -CLOCK_SKEW_TOLERANCE_SECS {
+                    None
+                } else {
+                    Some(delta.num_milliseconds().max(0))
+                }
+            });
             ev.metrics = Metrics {
-                elapsed_ms: ts.map(|t| (now - t).num_milliseconds().max(0)),
+                elapsed_ms,
                 ..Default::default()
             };
             events.push(ev);
