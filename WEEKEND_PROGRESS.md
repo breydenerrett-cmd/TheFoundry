@@ -53,3 +53,10 @@
 - Bug found by the restart demo: `derive_stalls` re-derived HUNG over restored records — fixed (skips restored).
 - Tests 64 → **74**; clippy/fmt clean. Sonnet worker ~189k tokens (largest so far).
 - Next: M-01 multi-machine agent; V-01 visual foundation running in `app/`.
+
+## 2026-09-04T23:05Z — V-01 static visual foundation
+
+- `app/` (Vite + React 18 + PixiJS 8, TypeScript): isometric SUBSTRATE floor with marquee, 6 bays + hatched UNRESOLVED, stations for all 12 states (+ fading/ended), observed = solid / inferred = dashed / unknown = hatched, per-bay output shelf where uninstrumented slots are hatched (UNKNOWN ≠ 0), FAILED/HUNG red and BREY_REQUIRED amber beacons, and a scanline "blind" overlay whenever pipeline is unverified or remote is degraded. `#scene-mirror` DOM exposes id/state/fidelity per station for machine assertion.
+- Playwright 4/4 (state mapping, overlay, marquee count, screenshot at `app/screenshots/floor-fixture.png`). CI gained a `web` job (build + Playwright). Tauri is scaffolded only — no webkit2gtk in this sandbox.
+- Honest assessment: a correct foundation, not yet a polished visual — stations are small primitives; density/motion/typography come in V-02..V-05.
+- Sonnet worker ~110k tokens. M-01 worker running.

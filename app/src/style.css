@@ -1,0 +1,105 @@
+:root {
+  color-scheme: dark;
+  --bg: #0a0d12;
+  --text: #d8e2f0;
+  --text-dim: #6d7a8f;
+  --amber: #ffb020;
+  --amber-bright: #ffcf5c;
+  --green: #35d488;
+  --red: #ff4d4f;
+  --font-mono: "Berkeley Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+    "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+
+body {
+  font-family: var(--font-mono);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.app-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.floor-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.floor-host canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.marquee {
+  flex: 0 0 auto;
+  border-bottom: 1px solid #232b38;
+  background: linear-gradient(180deg, #10141b 0%, #0c0f14 100%);
+  padding: 6px 14px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  z-index: 5;
+}
+
+.marquee-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 2px 0;
+}
+
+.marquee-brey {
+  color: var(--amber-bright);
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(255, 207, 92, 0.5);
+}
+
+.marquee-count {
+  color: var(--text-dim);
+}
+
+.marquee-status span {
+  color: var(--text);
+}
+
+.pipeline-ok {
+  color: var(--green) !important;
+}
+
+.pipeline-bad {
+  color: var(--amber-bright) !important;
+  font-weight: 700;
+}
+
+.marquee-blind {
+  box-shadow: inset 0 0 0 1px rgba(255, 176, 32, 0.35);
+}
+
+.load-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--red);
+  font-size: 14px;
+}

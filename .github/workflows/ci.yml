@@ -35,3 +35,27 @@ jobs:
           echo "$out" | head -8
           echo "$out" | grep -q "REMOTE ESTATE: not running" || { echo "smoke: expected honest no-remote banner"; exit 1; }
           if echo "$out" | grep -q "REMOTE ESTATE: live"; then echo "smoke: falsely claimed live remote"; exit 1; fi
+
+  web:
+    name: app (build · playwright truth-mapping)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: floor-screenshot
+          path: app/screenshots/floor-fixture.png
+          if-no-files-found: ignore
