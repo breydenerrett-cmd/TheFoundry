@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { loadFloorState } from "./feed";
+import { startFeed, type FeedStatus } from "./feed";
 import { mountFloor, type FloorHandle } from "./floor";
 import { Marquee } from "./Marquee";
-import type { BayName, FloorState } from "./state";
+import type { BayName, FloorState, SessionRecord } from "./state";
 import { BAYS } from "./state";
 import {
   detectIncident,
@@ -55,10 +55,53 @@ function storeMode(mode: Mode): void {
   }
 }
 
+/** L-01: a placeholder floor with nothing in it — what renders (under the
+ *  WATCHER DOWN overlay) when the http feed has never successfully returned
+ *  any state at all. Never a fixture, never fabricated occupancy. */
+const EMPTY_FLOOR_STATE: FloorState = {
+  generated_at: new Date(0).toISOString(),
+  sessions: [],
+  routines: [],
+  checks: [],
+  observers: [],
+  pipeline: {
+    verified: false,
+    remote_estate: "not_running",
+    last_sync_age_secs: null,
+    last_output_age_secs: null,
+    next_routine: null,
+  },
+  output_shelf: Object.fromEntries(BAYS.map((b) => [b, []])) as unknown as FloorState["output_shelf"],
+  machines: [],
+  tape: [],
+};
+
+/** L-01 truth rule: whenever the feed is `stale` or `down`, every station
+ *  renders through the existing "never trust a restored record" pipeline
+ *  (`effectiveState()` in states.ts) regardless of its nominal state — a
+ *  frozen/unreachable watcher must never show a station as confidently
+ *  WORKING. Returns the same object when the feed is live/fixture. */
+function withFeedStaleness(state: FloorState, liveness: FeedStatus["liveness"] | null): FloorState {
+  if (liveness !== "stale" && liveness !== "down") return state;
+  const sessions: SessionRecord[] = state.sessions.map((s) => ({ ...s, restored: true }));
+  return { ...state, sessions };
+}
+
 export function App() {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const [state, setState] = useState<FloorState | null>(null);
+  const [rawState, setRawState] = useState<FloorState | null>(null);
+  const [feedStatus, setFeedStatus] = useState<FeedStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The renderer always gets SOME FloorState once we know the feed kind —
+  // real data when we have it, or an honestly-empty placeholder (never a
+  // fixture) while the http feed has never returned anything at all — so
+  // the WATCHER DOWN overlay always has a floor underneath it to darken.
+  const state = useMemo(() => {
+    const base = rawState ?? (feedStatus ? EMPTY_FLOOR_STATE : null);
+    if (!base) return null;
+    return withFeedStaleness(base, feedStatus?.liveness ?? null);
+  }, [rawState, feedStatus]);
 
   const [mode, setModeRaw] = useState<Mode>(() => loadStoredMode() ?? "command");
   const [focusBay, setFocusBay] = useState<BayName | null>(null);
@@ -84,17 +127,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    loadFloorState()
-      .then((s) => {
-        if (!cancelled) setState(s);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
+    try {
+      const handle = startFeed((s, status) => {
+        if (s) setRawState(s);
+        setFeedStatus(status);
       });
-    return () => {
-      cancelled = true;
-    };
+      return () => handle.stop();
+    } catch (e) {
+      setError(String(e));
+      return undefined;
+    }
   }, []);
 
   // Default the focused bay to the most active one once state loads.
@@ -209,11 +251,32 @@ export function App() {
   const incident = useMemo(() => (state ? detectIncident(state) : null), [state]);
   const inferredFault = useMemo(() => (state ? hasInferredFault(state) : false), [state]);
 
+  const liveness: FeedStatus["liveness"] = feedStatus?.liveness ?? "down";
+  const feedDown = liveness === "down";
+  const feedStale = liveness === "stale";
+  const now = Date.now();
+  const okSecsAgo =
+    feedStatus?.lastFetchOkAt != null ? Math.max(0, Math.round((now - feedStatus.lastFetchOkAt) / 1000)) : null;
+  const frozenSecs =
+    feedStatus?.lastChangedAt != null ? Math.max(0, Math.round((now - feedStatus.lastChangedAt) / 1000)) : null;
+
   return (
-    <div className={`app-shell mode-${mode}`} data-mode={mode}>
-      {state && <Marquee state={state} mode={mode} />}
+    <div className={`app-shell mode-${mode}`} data-mode={mode} data-feed={liveness}>
+      {state && <Marquee state={state} mode={mode} feed={feedStatus} />}
       <div className="floor-host" ref={hostRef} />
       {state && inferredFault && mode !== "incident" && <div className="amber-wash" data-testid="inferred-fault-wash" />}
+      {(feedDown || feedStale) && (
+        <div className="feed-overlay" data-testid="feed-overlay">
+          <div className="feed-overlay-label">
+            {feedDown ? "WATCHER DOWN" : "STALE FEED"}
+          </div>
+          <div className="feed-overlay-detail">
+            {feedDown
+              ? `FEED: DOWN (last ok ${okSecsAgo ?? "n/a"}s ago)`
+              : `FEED: STALE (seq frozen ${frozenSecs ?? "n/a"}s)`}
+          </div>
+        </div>
+      )}
       {error && <div className="load-error">FLOOR LOAD ERROR: {error}</div>}
 
       {state && mode === "focus" && focusBay && (

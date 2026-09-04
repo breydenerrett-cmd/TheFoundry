@@ -110,3 +110,10 @@
 - Frame-rate ladder (DEEP DEBUG 60 / COMMAND 30 / AMBIENT 12 / hidden 2), time-parameterized motion, particle budget, tape ring cap. Measured harness (`app/perf/RESULTS.md`): main-thread busy ≤0.2% in every fixture×mode combo, heap flat across 3 reloads. **Caveat:** headless software rendering throttles rAF, so the fps column proves nothing about ladder targets — re-measure on Brey's GPU. Marquee overlap fixed (2-row grid, mode chip in own column), bay click→PROJECT FOCUS, real ±3° hue drift in AMBIENT, autopilot tested (idle→focus→back; FAILED snaps to INCIDENT). Playwright 17 → **25**.
 - Scope cuts, explicit: no static RenderTexture bakes (gates passed without them); 6s not 20s measurement windows.
 - Sonnet worker ~145k tokens. L-01 app side next.
+
+## 2026-09-05T02:40Z — L-01 live bridge (app side) — THE FOUNDRY runs live end to end
+
+- `feed.ts`: `?feed=http[:base]` polls the watcher's `/state` every 2s (1.5s timeout, optional token); `?feed=fixture[:name]` is labeled with an amber `FIXTURE` chip; default is http with **no fixture fallback** — a missing watcher renders a hatched WATCHER DOWN overlay and `FEED: DOWN (last ok Xs)`; a frozen `seq`/old `generated_at` renders `FEED: STALE`, and every station drops to STALE treatment. `data-feed` = live|stale|down|fixture.
+- `tests/live.spec.ts` spawns the real `foundry` binary, drives the app over http, asserts a live session (this Claude session, WORKING/inferred in SPORTS LAB), marquee == `/state` pipeline fields, then kills the watcher and asserts DOWN within ~10s with no solid WORKING station. `scripts/dev.sh` = one command to run it for real. Playwright 25 → **27**.
+- Screenshots: `app/screenshots/live-floor.png` (real watcher output), `live-down.png`.
+- Sonnet worker ~188k tokens (paused once waiting on a background test run; resumed).

@@ -165,6 +165,59 @@ body {
   z-index: 6;
 }
 
+/* L-01 liveness truth: a missing/frozen watcher darkens and hatches the
+   WHOLE floor (marquee included, z-index above it) — never a clean-looking
+   dashboard while the feed is down or the data has stopped moving. */
+.feed-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+      135deg,
+      rgba(255, 77, 79, 0.14) 0px,
+      rgba(255, 77, 79, 0.14) 10px,
+      rgba(10, 13, 18, 0.72) 10px,
+      rgba(10, 13, 18, 0.72) 20px
+    ),
+    rgba(8, 10, 14, 0.35);
+}
+
+.feed-overlay-label {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: var(--red);
+  text-shadow: 0 0 16px rgba(255, 77, 79, 0.6);
+}
+
+.feed-overlay-detail {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--amber-bright);
+}
+
+.marquee-fixture-chip {
+  color: #0a0d12;
+  background: var(--amber-bright);
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 1px 8px;
+  border-radius: 3px;
+}
+
+.marquee-feed-bad {
+  color: var(--red) !important;
+  font-weight: 700;
+}
+
 .mode-panel {
   position: absolute;
   inset: 76px 0 0 0;

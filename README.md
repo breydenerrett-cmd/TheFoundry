@@ -22,6 +22,25 @@ cargo run -- --feed-dir live-feed --watch 30         # poll every 30s (closer to
 
 `live-feed/` expects `list_sessions.json` and `list_triggers.json` in the shape documented in `src/observer.rs`'s `remote_claude_raw` module — today refreshed manually by a Claude session with the Claude_Code_Remote MCP tools loaded (see the open question above).
 
+## Run it live (L-01)
+
+The `app/` Pixi floor (see `app/README.md`) is no longer fixture-only — it
+can poll a real, running `watcher-core --serve` process and render the
+actual estate, with an honest WATCHER DOWN overlay when that process isn't
+reachable. One command from the repo root:
+
+```
+scripts/dev.sh
+```
+
+This builds `watcher-core`, starts it as `foundry --no-remote --git-dir .
+--state-json app/public/state.json --serve 127.0.0.1:8790 --watch 2
+--log-dir .foundry-state --bay-map foundry.bays.toml`, waits for it to come
+up, then runs `npm run dev` in `app/`. Open `http://localhost:5173/` — the
+app defaults to polling `http://127.0.0.1:8790` (no `?feed=` query needed).
+Ctrl-C stops both processes. See `app/README.md`'s "Live feed (L-01)"
+section for the query-param feed selector and the liveness rules.
+
 ## What NOT to build yet
 
 Per the explicit Phase 1-3 authorization: no Pixi/WebGL floor, no procedural assets, no animation, no `.foundry` heartbeat instrumentation in any other repo's scripts, no WebSocket transport (the Rust-in-Tauri finding in `PHASE1_REPORT.md` §2 means one may not even be needed), no project/bay/room resolution (§9, Phase 5). This phase's only job was proving the telemetry pipeline tells the truth.

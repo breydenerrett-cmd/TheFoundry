@@ -1,6 +1,7 @@
 import type { FloorState, StationState } from "./state";
 import { isOpusModel } from "./state";
 import { MODE_LABEL, type Mode } from "./modes";
+import type { FeedStatus } from "./feed";
 
 function fmtAge(secs: number | null): string {
   if (secs === null) return "n/a";
@@ -14,7 +15,15 @@ function cls(nonZero: boolean, attention: boolean): string {
   return attention ? "marquee-count marquee-attention" : "marquee-count marquee-bright";
 }
 
-export function Marquee({ state, mode }: { state: FloorState; mode?: Mode }) {
+export function Marquee({
+  state,
+  mode,
+  feed,
+}: {
+  state: FloorState;
+  mode?: Mode;
+  feed?: FeedStatus | null;
+}) {
   const counts: Partial<Record<StationState, number>> = {};
   for (const s of state.sessions) {
     counts[s.state] = (counts[s.state] ?? 0) + 1;
@@ -36,9 +45,26 @@ export function Marquee({ state, mode }: { state: FloorState; mode?: Mode }) {
   const pipeline = state.pipeline;
   const blind = !pipeline.verified || pipeline.remote_estate !== "live";
 
+  const now = Date.now();
+  const okSecsAgo =
+    feed?.lastFetchOkAt != null ? Math.max(0, Math.round((now - feed.lastFetchOkAt) / 1000)) : null;
+  const frozenSecs =
+    feed?.lastChangedAt != null ? Math.max(0, Math.round((now - feed.lastChangedAt) / 1000)) : null;
+  const feedLine =
+    feed?.liveness === "down"
+      ? `FEED: DOWN (last ok ${okSecsAgo ?? "n/a"}s ago)`
+      : feed?.liveness === "stale"
+        ? `FEED: STALE (seq frozen ${frozenSecs ?? "n/a"}s)`
+        : null;
+
   return (
     <div className={`marquee ${blind ? "marquee-blind" : ""}`}>
       <div className="marquee-row marquee-counts">
+        {feed?.kind === "fixture" && (
+          <span className="marquee-fixture-chip" data-testid="feed-fixture-chip">
+            FIXTURE
+          </span>
+        )}
         <span className={`marquee-brey ${breyCount === 0 ? "marquee-dim" : ""}`}>
           {breyCount} BREY REQUIRED{breyCount > 0 ? ` — ${breyLabels}` : ""}
         </span>
@@ -55,6 +81,11 @@ export function Marquee({ state, mode }: { state: FloorState; mode?: Mode }) {
         </span>
       )}
       <div className="marquee-row marquee-status">
+        {feedLine && (
+          <span className="marquee-feed-bad" data-testid="feed-status-line">
+            {feedLine}
+          </span>
+        )}
         <span>LAST OUTPUT {fmtAge(pipeline.last_output_age_secs)}</span>
         <span>
           NEXT ROUTINE {pipeline.next_routine ?? "n/a"}

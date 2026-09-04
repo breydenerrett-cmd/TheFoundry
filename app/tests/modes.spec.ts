@@ -3,7 +3,7 @@ import fixture from "../public/fixtures/floor.json" with { type: "json" };
 import statesFixture from "../public/fixtures/floor-states.json" with { type: "json" };
 
 test("hotkeys switch modes and set data-mode", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   const shell = page.locator(".app-shell");
   await expect(shell).toHaveAttribute("data-mode", "incident"); // floor.json auto-enters INCIDENT
   await page.waitForSelector('[data-testid="incident-panel"]');
@@ -32,7 +32,7 @@ test("INCIDENT auto-enters on floor.json (FAILED + BREY_REQUIRED) and not on flo
   );
   expect(hasObservedFault).toBe(true);
 
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   await expect(page.locator(".app-shell")).toHaveAttribute("data-mode", "incident");
   await expect(page.locator('[data-testid="incident-panel"]')).toBeVisible();
 
@@ -67,14 +67,14 @@ test("PROJECT FOCUS shows the selected bay name", async ({ page }) => {
 });
 
 test("INCIDENT screenshot", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   await expect(page.locator(".app-shell")).toHaveAttribute("data-mode", "incident");
   await page.waitForTimeout(300);
   await page.screenshot({ path: "screenshots/mode-incident.png", fullPage: false });
 });
 
 test("DEEP DEBUG renders the tape rows count", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   await page.waitForSelector('[data-testid="incident-panel"]');
   await page.keyboard.press("Escape");
   await page.keyboard.press("5");

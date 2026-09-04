@@ -6,7 +6,7 @@ import statesFixture from "../public/fixtures/floor-states.json" with { type: "j
 import { STATE_TABLE, motionFor, beaconFor } from "../src/states";
 
 test("every fixture session appears with its state token", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   const mirror = page.locator("#scene-mirror");
   await expect(mirror.locator("div")).toHaveCount(fixture.sessions.length);
 
@@ -19,7 +19,7 @@ test("every fixture session appears with its state token", async ({ page }) => {
 });
 
 test("unverified pipeline shows the blind overlay", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   expect(fixture.pipeline.verified).toBe(false);
   const marquee = page.locator(".marquee");
   await expect(marquee).toHaveClass(/marquee-blind/);
@@ -27,20 +27,20 @@ test("unverified pipeline shows the blind overlay", async ({ page }) => {
 });
 
 test("BREY_REQUIRED count in marquee matches fixture", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   const breyCount = fixture.sessions.filter((s) => s.state === "brey_required").length;
   expect(breyCount).toBeGreaterThan(0);
   await expect(page.locator(".marquee-brey")).toContainText(`${breyCount} BREY REQUIRED`);
 });
 
 test("screenshot of the fixture floor", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   await page.waitForTimeout(300);
   await page.screenshot({ path: "screenshots/floor-fixture.png", fullPage: false });
 });
 
 test("marquee renders in required order with correct counts", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   const counts: Record<string, number> = {};
   for (const s of fixture.sessions) counts[s.state] = (counts[s.state] ?? 0) + 1;
   const failed = counts.failed ?? 0;
@@ -80,7 +80,7 @@ test("marquee renders in required order with correct counts", async ({ page }) =
 });
 
 test("inferred WORKING station renders ghost motion, unknown renders none", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   const inferredWorking = fixture.sessions.find(
     (s) => s.state === "working" && s.fidelity === "inferred"
   )!;
@@ -99,7 +99,7 @@ test("idle fixture: no blind overlay, lower ambient", async ({ page }) => {
   expect(idleFixture.pipeline.verified).toBe(true);
   expect(idleFixture.pipeline.remote_estate).toBe("live");
 
-  await page.goto("/");
+  await page.goto("/?fixture=floor.json");
   const busyAmbient = parseFloat((await page.locator(".floor-host").getAttribute("data-ambient"))!);
 
   await page.goto("/?fixture=floor-idle.json");
@@ -168,7 +168,7 @@ test("layout: scene bounds fill most of the viewport at 1280x720 and 1920x1080",
     [1920, 1080],
   ] as const) {
     await page.setViewportSize({ width, height });
-    await page.goto("/");
+    await page.goto("/?fixture=floor.json");
     await page.waitForTimeout(300);
 
     const host = page.locator(".floor-host");

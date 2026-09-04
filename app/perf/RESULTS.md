@@ -9,10 +9,10 @@ steps including DEEP DEBUG 60fps, which isn't gated here).
 
 | fixture | mode | fps | main-thread busy | JS heap | particles/frame | frames sampled | gate |
 |---|---|---|---|---|---|---|---|
-| floor-idle.json | command | 7.9 | 0.1% | 9.5 MB | 0 | 48 | PASS — busy<=25% (ok) |
-| floor-idle.json | ambient | 8.1 | 0.2% | 9.5 MB | 0 | 49 | PASS — fps<=~12 (ok), busy<=8% (ok) |
-| floor.json | command | 4.3 | 0.1% | 9.5 MB | 19 | 26 | PASS — busy<=25% (ok) |
-| floor.json | ambient | 4.3 | 0.1% | 9.5 MB | 0 | 27 | PASS — fps<=~12 (ok), busy<=8% (ok) |
+| floor-idle.json | command | 8.1 | 0.1% | 9.5 MB | 0 | 49 | PASS — busy<=25% (ok) |
+| floor-idle.json | ambient | 8.2 | 0.1% | 9.5 MB | 0 | 50 | PASS — fps<=~12 (ok), busy<=8% (ok) |
+| floor.json | command | 4.5 | 0.1% | 9.5 MB | 19 | 27 | PASS — busy<=25% (ok) |
+| floor.json | ambient | 4.5 | 0.1% | 9.5 MB | 0 | 28 | PASS — fps<=~12 (ok), busy<=8% (ok) |
 
 Gates (per mission spec):
 - AMBIENT: achieved fps at/near the 12fps ladder target, main-thread busy <= 8% of wall time.

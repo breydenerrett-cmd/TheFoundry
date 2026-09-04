@@ -20,6 +20,48 @@ npm test           # Playwright, chromium headless_shell at /opt/pw-browsers
 `npm run build` and `npm test` are both standalone — no Tauri build is
 required or attempted in this environment (see "Tauri scaffold" below).
 
+## Live feed (L-01)
+
+The app is no longer fixture-only. `src/feed.ts` picks one of three sources
+from the URL query:
+
+- **`?feed=http[:base]`** (default when there is no `?feed=`/`?fixture=`
+  query at all) — polls a real `watcher-core --serve` process's `GET /state`
+  every 2s (`base` defaults to `http://127.0.0.1:8790`), with a 1.5s
+  per-request timeout. Add `&token=...` if the watcher was started with
+  `--serve-token` (sent as `X-Foundry-Token`). **With no watcher reachable,
+  the app renders nothing loaded and shows the WATCHER DOWN overlay — it
+  never silently falls back to a fixture.** The easiest way to see this for
+  real: `../scripts/dev.sh` from the repo root builds and runs the watcher
+  and starts this dev server pointed at it in one command.
+- **`?feed=fixture[:name]`** (or the legacy `?fixture=name`) — the static
+  JSON fixtures described below. Always labeled: the marquee shows an amber
+  `FIXTURE` chip and the app root carries `data-feed="fixture"` — a fixture
+  can never be mistaken for a live estate.
+- **`?feed=file:`** — reserved for the future Tauri desktop shell's local
+  file-watch bridge. Deliberately throws `"not wired"` rather than faking
+  data; not usable yet.
+
+**Liveness truth gate.** `App.tsx` tracks the last successful fetch, the
+`generated_at` on the most recently received state, and how long that
+`generated_at` has gone unchanged. Whenever the http feed has never
+succeeded, has missed more than 3 consecutive polls, has `generated_at`
+older than 30s, or has gone unchanged for more than 60s, the app renders a
+hatched WATCHER DOWN / STALE FEED overlay over the whole floor (marquee
+included), every station renders through the same "never trust a restored
+record" pipeline `states.ts` already uses for stale snapshot data (so
+nothing shows as confidently WORKING), and the marquee's status row shows
+`FEED: DOWN (last ok Xs ago)` or `FEED: STALE (seq frozen Xs)`. Recovery
+clears it automatically on the next good poll. The app root always carries
+`data-feed="live"|"stale"|"down"|"fixture"` for tests/inspection.
+
+`tests/live.spec.ts` spawns the real `watcher-core` binary (building it
+first if needed), points the app at it, and asserts `data-feed="live"`, a
+live session in the scene mirror, marquee text matching `/state`'s pipeline
+fields, and — after killing the watcher — `data-feed="down"` with the
+overlay within ~10s and no station left rendering as solid WORKING.
+Screenshots: `screenshots/live-floor.png`, `screenshots/live-down.png`.
+
 ## What's fixture vs live
 
 - `src/state.ts` — the only vocabulary the renderer knows about. Mirrors
@@ -46,12 +88,10 @@ required or attempted in this environment (see "Tauri scaffold" below).
   and one `restored` WORKING, so `tests/floor.spec.ts` can assert the
   scene-mirror matches `src/states.ts` exactly for every state × fidelity
   combination.
-- `src/feed.ts` — the loader. Reads `?fixture=<name>.json` from the URL query
-  (sandboxed to `public/fixtures/`) or defaults to `floor.json`. This is the
-  **only** file that will change when a live `/state` WebSocket or Tauri
-  event stream replaces the fixture — `src/floor.ts` and `src/Marquee.tsx`
-  only ever depend on the `FloorState` shape from `state.ts`, never on how it
-  was fetched.
+- `src/feed.ts` — the data source. Now three-way (`fixture`/`http`/`file`,
+  see "Live feed (L-01)" above) instead of fixture-only — `src/floor.ts` and
+  `src/Marquee.tsx` still only ever depend on the `FloorState` shape from
+  `state.ts`, never on how it was fetched.
 
 No other runtime network calls are made.
 
