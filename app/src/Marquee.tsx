@@ -1,5 +1,6 @@
 import type { FloorState, StationState } from "./state";
 import { isOpusModel } from "./state";
+import { MODE_LABEL, type Mode } from "./modes";
 
 function fmtAge(secs: number | null): string {
   if (secs === null) return "n/a";
@@ -13,7 +14,7 @@ function cls(nonZero: boolean, attention: boolean): string {
   return attention ? "marquee-count marquee-attention" : "marquee-count marquee-bright";
 }
 
-export function Marquee({ state }: { state: FloorState }) {
+export function Marquee({ state, mode }: { state: FloorState; mode?: Mode }) {
   const counts: Partial<Record<StationState, number>> = {};
   for (const s of state.sessions) {
     counts[s.state] = (counts[s.state] ?? 0) + 1;
@@ -47,6 +48,11 @@ export function Marquee({ state }: { state: FloorState }) {
         <span className={cls(waitingCount > 0, false)}>{waitingCount} WAITING</span>
         <span className={cls(staleCount > 0, true)}>{staleCount} STALE</span>
         <span className={cls(opusCount > 0, false)}>{opusCount} OPUS</span>
+        {mode && (
+          <span className="marquee-mode" data-testid="mode-indicator">
+            MODE: {MODE_LABEL[mode]}
+          </span>
+        )}
       </div>
       <div className="marquee-row marquee-status">
         <span>LAST OUTPUT {fmtAge(pipeline.last_output_age_secs)}</span>

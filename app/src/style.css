@@ -126,3 +126,138 @@ body {
   color: var(--red);
   font-size: 14px;
 }
+
+.marquee-mode {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+/* AMBIENT: dimmed chrome — marquee counts row fades, status/truth row
+   (LAST OUTPUT / REMOTE ESTATE / PIPELINE) stays legible. */
+.app-shell[data-mode="ambient"] .marquee-counts {
+  opacity: 0.35;
+}
+.app-shell[data-mode="ambient"] .marquee-status {
+  opacity: 1;
+}
+
+.amber-wash {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 176, 32, 0.08);
+  pointer-events: none;
+  z-index: 6;
+}
+
+.mode-panel {
+  position: absolute;
+  inset: 76px 0 0 0;
+  z-index: 20;
+  background: rgba(8, 10, 14, 0.92);
+  color: var(--text);
+  overflow: auto;
+  padding: 20px;
+}
+
+.focus-panel .focus-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  justify-content: center;
+}
+.focus-nav {
+  background: none;
+  border: 1px solid var(--text-dim);
+  color: var(--text);
+  font-size: 18px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.focus-bay-name {
+  letter-spacing: 2px;
+  margin: 0;
+}
+.focus-stations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 16px 0;
+}
+.focus-station {
+  border: 1px solid var(--text-dim);
+  padding: 10px 14px;
+  min-width: 220px;
+}
+.focus-station-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+.focus-wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+.focus-wall h3 {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  margin: 0 0 6px 0;
+}
+.shelf-unknown {
+  color: var(--text-dim);
+}
+
+.incident-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.incident-fault {
+  width: 60%;
+  min-width: 320px;
+  border: 1px solid var(--red);
+  padding: 24px;
+  background: rgba(255, 77, 79, 0.05);
+}
+.incident-fault dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 12px 0 0 0;
+}
+.incident-fault dt {
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+.incident-fault dd {
+  margin: 0;
+}
+
+.debug-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr 260px;
+  gap: 16px;
+  font-size: 12px;
+}
+.debug-col h3 {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  margin: 0 0 8px 0;
+}
+.tape-row {
+  display: flex;
+  gap: 8px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  border-bottom: 1px solid #1a1f28;
+  padding: 2px 0;
+}

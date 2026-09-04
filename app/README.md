@@ -162,14 +162,79 @@ station.
   no motion, no beacon) with a `(restored)` tag appended to its label,
   regardless of its nominal state — never trust a restored WORKING.
 
+## V-04 display modes
+
+Five hotkey-selectable modes, plus two carry-over fixes from V-03.
+
+- **Carry-over A — label collision avoidance.** `resolveLabelCollisions()`
+  in `src/floor.ts` runs after every `layout()` (initial + resize): per bay,
+  while any two stations' signage-tag bounding boxes intersect (in actual
+  screen space, post fit-to-viewport scale), the lower-sitting one is nudged
+  further down, for up to 8 passes. Label rects are exposed on the scene
+  mirror as `data-label-rect="x,y,w,h"` (screen space) so
+  `tests/modes.spec.ts`'s label-collision test can assert no two rects
+  intersect for every state in `floor-states.json`.
+- **Carry-over B — glyph dispatch through the table.** `drawShapeHint()` in
+  `src/floor.ts` now takes `spec.glyph` (from `STATE_TABLE`, see
+  `src/states.ts`) and switches on the glyph name, not the station state —
+  `STATE_TABLE` is the actual draw dispatch, the single place to change what
+  a state looks like.
+- **Modes.** `src/modes.ts` holds the pure mode logic (`Mode` type,
+  `detectIncident()`, `mostActiveBay()`, hotkey table); `src/App.tsx` wires
+  hotkeys 1–5 + Esc, persists the last mode to `localStorage`
+  (`foundry-mode`), and exposes `data-mode` on `.app-shell`. A small mode
+  indicator sits in the marquee's right corner (`.marquee-mode`).
+  1. **COMMAND CENTER** (`1`, default) — full floor, full marquee, unchanged
+     from V-03.
+  2. **PROJECT FOCUS** (`2`) — one bay fills the screen
+     (`src/ModeOverlays.tsx`'s `ProjectFocus`): enlarged per-station
+     model/effort/elapsed/task-label cards, the bay's routines
+     (name + next/overdue/stale/disabled), a git plinth, the test-rack/
+     heartbeat check states, and an enlarged output shelf with per-type
+     counts (`UNKNOWN` shown, never a fabricated zero). `←`/`→` cycle bays;
+     `Esc` returns to COMMAND CENTER.
+  3. **AMBIENT** (`3`) — dimmed marquee counts row (the `LAST OUTPUT` /
+     `NEXT ROUTINE` / `REMOTE ESTATE` / `PIPELINE` truth line always stays
+     at full opacity, per the truth-gate rule), floor particle budget cut to
+     ~25%, a 12fps cap, and a periodic 1px scene offset for burn-in hygiene
+     (see the `getMode()`-gated branch in `floor.ts`'s ticker). The blind
+     overlay still shows underneath when the pipeline is unverified.
+  4. **INCIDENT** (`4`, or auto-entered) — `detectIncident()` in
+     `src/modes.ts` triggers only on an **observed**, non-restored
+     FAILED/BREY_REQUIRED session, or an enabled+non-stale routine gone
+     overdue (`DEFAULT_OVERDUE_MINUTES = 15`, configurable via
+     `detectIncident`'s second arg) — never on `inferred`-only signals,
+     which instead get a subtle amber wash (`hasInferredFault()` /
+     `.amber-wash`). The fault detail panel
+     (`src/ModeOverlays.tsx`'s `IncidentPanel`) shows station id, state,
+     elapsed, task label, last-observed, and fidelity. Auto-exits back to
+     the pre-incident mode once `detectIncident()` goes inactive; `Esc`
+     dismisses manually and re-arms on the *next* distinct incident (tracked
+     by a `bay:station-id` key in `App.tsx`).
+  5. **DEEP DEBUG** (`5`) — side-by-side L3 station detail + the L4 redacted
+     event tape (`FloorState.tape`, ~20 shape-only rows: ts/source/kind/
+     entity/state/fidelity, no free text), a per-observer health list
+     (status + `capabilities` + `last_error`), and the MACHINES list
+     (`FloorState.machines`). Runs at a 60fps cap, no ambience.
+  - **Autopilot.** After 60s idle (no mouse/keys) in COMMAND CENTER,
+    `App.tsx` drifts into PROJECT FOCUS on the most active bay
+    (`mostActiveBay()`) for 20s, then returns — any observed
+    FAILED/BREY_REQUIRED still snaps straight to INCIDENT regardless, via
+    the same `detectIncident()` effect.
+
+Screenshots: `screenshots/mode-focus.png`, `screenshots/mode-ambient.png`,
+`screenshots/mode-incident.png`, `screenshots/mode-debug.png`.
+
 ## Test-only DOM mirror
 
 `#scene-mirror` (hidden) lists one `<div>` per session with
 `data-station-id`, `data-state`, `data-fidelity`, `data-bay`, `data-motion`
 (`solid`/`ghost`/`none`, see `src/states.ts`'s `motionFor()`), `data-beacon`
-(`none`/`amber`/`red`, see `beaconFor()`), and — when the record is
-`restored` — `data-restored="true"`. `tests/floor.spec.ts` can assert the
-rendered truth mapping without pixel inspection. It asserts:
+(`none`/`amber`/`red`, see `beaconFor()`), `data-label-rect="x,y,w,h"`
+(screen-space signage-tag bounding box, post collision-avoidance — see
+V-04 above), and — when the record is `restored` — `data-restored="true"`.
+`tests/floor.spec.ts` and `tests/modes.spec.ts` assert the rendered truth
+mapping without pixel inspection. `floor.spec.ts` asserts:
 
 1. every fixture session appears in the mirror with its exact state token;
 2. the unverified-pipeline fixture produces the blind overlay class + text;
@@ -190,9 +255,19 @@ rendered truth mapping without pixel inspection. It asserts:
 9. `public/fixtures/floor-blind.json` (all observers down, unverified
    pipeline) renders the blind overlay and `PIPELINE: UNVERIFIED`.
 
+`tests/modes.spec.ts` additionally asserts: hotkeys 1–5/Esc set `data-mode`
+on `.app-shell`; INCIDENT auto-enters on `floor.json` (has an observed
+FAILED + an observed BREY_REQUIRED) and not on `floor-idle.json`; AMBIENT
+keeps the `PIPELINE`/`REMOTE ESTATE` truth line visible; PROJECT FOCUS shows
+the selected bay's name; DEEP DEBUG renders one tape row per
+`FloorState.tape` entry; and no two `data-label-rect`s intersect for
+`floor-states.json`.
+
 Screenshots are saved to `screenshots/floor-fixture.png`,
-`screenshots/floor-idle.png`, `screenshots/floor-blind.png`, and
-`screenshots/floor-states.png` on every test run.
+`screenshots/floor-idle.png`, `screenshots/floor-blind.png`,
+`screenshots/floor-states.png`, `screenshots/mode-focus.png`,
+`screenshots/mode-ambient.png`, `screenshots/mode-incident.png`, and
+`screenshots/mode-debug.png` on every test run.
 
 ## Tauri scaffold
 

@@ -91,3 +91,9 @@
 ## 2026-09-05T00:55Z — CI red streak (runs #7–#9) root-caused
 
 - Three consecutive failed runs after M-01: the Rust smoke step ran `cargo run` which refuses to pick between the two binaries once `foundry-agent` existed, so the output was empty and the "honest no-remote banner" assertion failed. Local tests had passed because they never invoked `cargo run`. Fix: `default-run = "foundry"` (0894be3). Lesson recorded: the smoke step is doing its job — it fails closed when the dashboard produces nothing.
+
+## 2026-09-05T01:10Z — V-04 display modes
+
+- Modes COMMAND CENTER / PROJECT FOCUS / AMBIENT / INCIDENT / DEEP DEBUG (hotkeys 1–5, Esc), persisted; INCIDENT auto-enters only on *observed* FAILED / BREY_REQUIRED / >15 min overdue (inferred-only faults get an amber wash, never a takeover) and re-arms per distinct incident; AMBIENT drops chrome but never the PIPELINE/REMOTE ESTATE truth line; DEEP DEBUG lists redacted shape-only tape, observer capabilities, MACHINES. Carry-overs fixed: label collision avoidance (tested), glyph dispatch through the state table. Playwright 10 → **17**.
+- CI #11 green (Rust + web) after `default-run`. Remaining cuts → V-05: bay click-to-focus, real hue drift, autopilot test, mode indicator clips marquee line 2.
+- Sonnet worker ~145k tokens.

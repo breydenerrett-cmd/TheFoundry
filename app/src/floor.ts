@@ -130,6 +130,7 @@ interface StationSprite {
   chassis: Graphics;
   beacon: Graphics | null;
   label: Text | null;
+  tag: Text;
   fidelityOverlay: Graphics;
   particleLayer: Graphics;
   record: SessionRecord;
@@ -137,11 +138,31 @@ interface StationSprite {
   elapsedBase: number;
 }
 
+function rectsIntersect(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number }
+): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
 export interface FloorHandle {
   destroy: () => void;
 }
 
-export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promise<FloorHandle> {
+export interface FloorRenderOptions {
+  /** Polled every frame so AMBIENT (reduced particle budget, 12fps cap, hue
+   *  drift, periodic 1px burn-in offset) and DEEP DEBUG (60fps, no
+   *  ambience) can change the floor's performance profile without a
+   *  remount. Defaults to "command" (V-03 behavior, unchanged). */
+  getMode?: () => "command" | "focus" | "ambient" | "incident" | "debug";
+}
+
+export function mountFloor(
+  canvasHost: HTMLDivElement,
+  state: FloorState,
+  options: FloorRenderOptions = {}
+): Promise<FloorHandle> {
+  const getMode = options.getMode ?? (() => "command" as const);
   const app = new Application();
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -443,12 +464,41 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
           chassis,
           beacon,
           label,
+          tag,
           fidelityOverlay,
           particleLayer,
           record,
           phase: Math.random() * Math.PI * 2,
           elapsedBase: record.elapsed_secs,
         };
+      }
+
+      // Carry-over fix A: station signage labels can overlap at small
+      // scene scales (see floor-states.png). Simple stagger-vertically
+      // collision avoidance, per bay: while any two stations' label
+      // (signage tag) bounding boxes intersect, nudge the lower-sitting
+      // one further down. Runs post-layout, in screen space, so it accounts
+      // for the actual fit-to-viewport scale.
+      function resolveLabelCollisions(): void {
+        const step = 14 / Math.max(0.01, world.scale.x);
+        for (let iter = 0; iter < 8; iter++) {
+          let any = false;
+          for (let i = 0; i < stations.length; i++) {
+            for (let j = i + 1; j < stations.length; j++) {
+              const a = stations[i];
+              const b = stations[j];
+              if (a.record.bay !== b.record.bay) continue;
+              const ra = a.tag.getBounds();
+              const rb = b.tag.getBounds();
+              if (rectsIntersect(ra, rb)) {
+                any = true;
+                if (a.tag.y <= b.tag.y) b.tag.y += step;
+                else a.tag.y += step;
+              }
+            }
+          }
+          if (!any) break;
+        }
       }
 
       function drawLightPool(g: Graphics, eff: StationState, spec: (typeof STATE_TABLE)[StationState]): void {
@@ -518,8 +568,10 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         }
 
         // Non-color shape hint on the roof, colorblind-safe (matches V-01's
-        // circle/square/diamond/triangle family per state).
-        drawShapeHint(g, eff, h / 2 - lift);
+        // circle/square/diamond/triangle family per state). Dispatches on
+        // `spec.glyph` from STATE_TABLE — the table is the actual draw
+        // dispatch, not a second switch on `state`.
+        drawShapeHint(g, spec.glyph, h / 2 - lift);
 
         // HUNG: a frozen billet stalled on a conveyor stub.
         if (eff === "hung") {
@@ -532,57 +584,61 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
         }
       }
 
-      function drawShapeHint(g: Graphics, state: StationState, cy: number): void {
+      // Glyph draw dispatch — reads `spec.glyph` from STATE_TABLE (see
+      // states.ts) so the table itself is the single source of truth for
+      // what shape a state renders as, not a second inline switch on
+      // `state`. Adding/changing a state's glyph in states.ts is the only
+      // edit needed to change what's drawn here.
+      function drawShapeHint(g: Graphics, glyph: (typeof STATE_TABLE)[StationState]["glyph"], cy: number): void {
         const c = COLORS.white;
-        switch (state) {
-          case "working":
-          case "thinking":
+        switch (glyph) {
+          case "circle":
             g.circle(0, cy, 4);
             g.fill({ color: c, alpha: 0.7 });
             break;
-          case "specialist":
-            g.poly([0, cy - 5, 5, cy, 0, cy + 5, -5, cy]);
-            g.fill({ color: c, alpha: 0.7 });
-            break;
-          case "waiting_on_agent":
-          case "waiting_on_system":
-          case "blocked":
-            g.rect(-4, cy - 4, 8, 8);
-            g.stroke({ width: 1.5, color: c, alpha: 0.7 });
-            if (state === "blocked") {
-              g.moveTo(-3, cy - 3);
-              g.lineTo(3, cy + 3);
-              g.moveTo(3, cy - 3);
-              g.lineTo(-3, cy + 3);
-              g.stroke({ width: 1.5, color: c, alpha: 0.7 });
-            }
-            break;
-          case "brey_required":
-            g.poly([0, cy - 6, 5, cy - 2, 0, cy + 2]);
-            g.fill({ color: c, alpha: 0.9 });
-            break;
-          case "failed":
-            g.poly([0, cy - 5, 5, cy + 4, -5, cy + 4]);
-            g.fill({ color: c, alpha: 0.85 });
-            break;
-          case "hung":
-            g.poly([0, cy - 5, 5, cy + 4, -5, cy + 4]);
-            g.stroke({ width: 1.5, color: c, alpha: 0.85 });
-            break;
-          case "idle":
-            g.rect(-3, cy - 3, 6, 6);
-            g.fill({ color: c, alpha: 0.4 });
-            break;
-          case "completed":
+          case "circle-outline":
             g.circle(0, cy, 4);
             g.stroke({ width: 1.5, color: c, alpha: 0.9 });
             break;
-          case "stale_unknown":
-            hatchPattern(g, 10, 10, c, 0.5);
-            break;
-          case "fading_ended":
+          case "circle-faint":
             g.circle(0, cy, 4);
             g.fill({ color: c, alpha: 0.2 });
+            break;
+          case "diamond":
+            g.poly([0, cy - 5, 5, cy, 0, cy + 5, -5, cy]);
+            g.fill({ color: c, alpha: 0.7 });
+            break;
+          case "square":
+            g.rect(-4, cy - 4, 8, 8);
+            g.stroke({ width: 1.5, color: c, alpha: 0.7 });
+            break;
+          case "square-x":
+            g.rect(-4, cy - 4, 8, 8);
+            g.stroke({ width: 1.5, color: c, alpha: 0.7 });
+            g.moveTo(-3, cy - 3);
+            g.lineTo(3, cy + 3);
+            g.moveTo(3, cy - 3);
+            g.lineTo(-3, cy + 3);
+            g.stroke({ width: 1.5, color: c, alpha: 0.7 });
+            break;
+          case "square-dim":
+            g.rect(-3, cy - 3, 6, 6);
+            g.fill({ color: c, alpha: 0.4 });
+            break;
+          case "flag":
+            g.poly([0, cy - 6, 5, cy - 2, 0, cy + 2]);
+            g.fill({ color: c, alpha: 0.9 });
+            break;
+          case "triangle":
+            g.poly([0, cy - 5, 5, cy + 4, -5, cy + 4]);
+            g.fill({ color: c, alpha: 0.85 });
+            break;
+          case "triangle-outline":
+            g.poly([0, cy - 5, 5, cy + 4, -5, cy + 4]);
+            g.stroke({ width: 1.5, color: c, alpha: 0.85 });
+            break;
+          case "hatch":
+            hatchPattern(g, 10, 10, c, 0.5);
             break;
         }
       }
@@ -688,12 +744,14 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
       }
 
       layout();
+      resolveLabelCollisions();
 
       // scene-mirror: test-only DOM truth mapping.
       function updateSceneMirror(): void {
         const mirror = document.getElementById("scene-mirror");
         if (!mirror) return;
         mirror.innerHTML = "";
+        const byId = new Map(stations.map((st) => [st.record.id, st]));
         for (const s of state.sessions) {
           const row = document.createElement("div");
           row.dataset.stationId = s.id;
@@ -703,6 +761,11 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
           row.dataset.motion = motionFor(s.state, s.fidelity, s.restored);
           row.dataset.beacon = beaconFor(s.state, s.restored);
           if (s.restored) row.dataset.restored = "true";
+          const st = byId.get(s.id);
+          if (st) {
+            const r = st.tag.getBounds();
+            row.dataset.labelRect = [r.x, r.y, r.width, r.height].map((n) => n.toFixed(1)).join(",");
+          }
           row.textContent = `${s.id}|${s.state}|${s.fidelity}|${s.bay}|${row.dataset.motion}|${row.dataset.beacon}`;
           mirror.appendChild(row);
         }
@@ -762,6 +825,8 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
 
       app.renderer.on("resize", () => {
         layout();
+        resolveLabelCollisions();
+        updateSceneMirror();
         drawOverlay();
         drawScanlines();
         drawAmbientWash(performance.now() / 1000);
@@ -770,17 +835,34 @@ export function mountFloor(canvasHost: HTMLDivElement, state: FloorState): Promi
       // 30fps cap + reduced-motion respect. Motion is time-parameterized
       // (elapsed seconds), never frame-count-parameterized.
       let elapsed = 0;
-      const frameBudget = 1 / 30;
+      let lastMode: ReturnType<typeof getMode> | null = null;
       app.ticker.maxFPS = 30;
       app.ticker.add((ticker) => {
+        const mode = getMode();
+        if (mode !== lastMode) {
+          lastMode = mode;
+          app.ticker.maxFPS = mode === "ambient" ? 12 : mode === "debug" ? 60 : 30;
+        }
+        const frameBudget = mode === "ambient" ? 1 / 12 : mode === "debug" ? 1 / 60 : 1 / 30;
         elapsed += ticker.deltaMS / 1000;
         if (elapsed < frameBudget) return;
         elapsed = 0;
         const t = performance.now() / 1000;
         drawAmbientWash(t);
+
+        if (mode === "ambient" && !reducedMotion) {
+          // Burn-in hygiene: slow hue drift on the ambient wash + a periodic
+          // 1px scene offset. Ambience never drops the truth line — this is
+          // purely a floor-visual, the marquee is untouched.
+          world.x += Math.sin(t * 0.05) > 0.999 ? 1 : 0;
+        }
+
         if (reducedMotion) return;
 
         for (const st of stations) {
+          if (mode === "ambient" && Math.random() > 0.25) continue; // reduced particle budget
+
+
           const s = effectiveState(st.record.state, st.record.restored);
           const motion = motionFor(st.record.state, st.record.fidelity, st.record.restored);
 

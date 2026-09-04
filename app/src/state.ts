@@ -112,6 +112,28 @@ export interface ObserverHealth {
   last_success_at: string | null;
   last_error: string | null;
   consecutive_failures: number;
+  /** Capabilities this observer currently reports (e.g. "routines",
+   *  "sessions", "checks") — DEEP DEBUG's per-observer health list. */
+  capabilities?: string[];
+}
+
+/** A remote machine in the estate — DEEP DEBUG's MACHINES list. */
+export interface MachineRecord {
+  id: string;
+  name: string;
+  reachable: boolean;
+  last_seen_secs: number | null;
+}
+
+/** One redacted L4 event-tape row — shape-only, no free text beyond the
+ *  fixed `kind`/`state` vocabulary (see DEEP DEBUG in the mission brief). */
+export interface TapeEvent {
+  ts: string;
+  source: string;
+  kind: string;
+  entity: string;
+  state: string;
+  fidelity: Fidelity;
 }
 
 export type RemoteEstate = "live" | "degraded" | "not_running";
@@ -141,4 +163,9 @@ export interface FloorState {
   observers: ObserverHealth[];
   pipeline: PipelineSummary;
   output_shelf: Record<BayName, OutputShelfSlot[]>;
+  /** Remote estate machines — DEEP DEBUG's MACHINES list. Optional: absent
+   *  in older/synthetic fixtures. */
+  machines?: MachineRecord[];
+  /** Redacted L4 event tape — DEEP DEBUG's event-tape panel. Optional. */
+  tape?: TapeEvent[];
 }
