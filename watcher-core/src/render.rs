@@ -107,6 +107,28 @@ pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
     } else {
         out.push_str(&format!("\x1b[1;31m THE FOUNDRY — UNVERIFIED (no recent canary heartbeat — DO NOT TRUST){RESET}\n"));
     }
+    // Phase 4C: Remote/cloud estate gets its OWN explicit freshness line,
+    // separate from the local-observer-driven pipeline banner above. A
+    // standalone process cannot poll this continuously (§ access-bridge
+    // report — no zero-cost read API exists), so it is refreshed manually
+    // on-demand; old data must never silently read as current.
+    const REMOTE_STALE_SECS: i64 = 30 * 60;
+    match store.observer_health.get("remote_claude") {
+        Some(h) => match h.last_sync_age_secs(now) {
+            Some(age) if age <= REMOTE_STALE_SECS => {
+                out.push_str(&format!(" {DIM}REMOTE ESTATE: live (last sync {}){RESET}\n", fmt_age(age)));
+            }
+            Some(age) => {
+                out.push_str(&format!(" \x1b[1;33mREMOTE ESTATE — DEGRADED{RESET} {DIM}(last sync {} ago — run the manual refresh; see PHASE3_5_ACCESS_BRIDGE.md §6){RESET}\n", fmt_age(age)));
+            }
+            None => {
+                out.push_str(&format!(" \x1b[1;33mREMOTE ESTATE — DEGRADED{RESET} {DIM}(never synced this run){RESET}\n"));
+            }
+        },
+        None => {
+            out.push_str(&format!(" {DIM}REMOTE ESTATE: not running (--no-remote) — local observers only, not faked{RESET}\n"));
+        }
+    }
     // §5a: a confirmed zero and "we couldn't check" must never look the
     // same. `sessions_confirmed` is true only if some observer THIS poll
     // actually reported the sessions capability — only then is an empty
@@ -122,8 +144,12 @@ pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
     } else {
         counts_str.join(" · ")
     };
+    let last_output = match store.last_output_at() {
+        Some(t) => format!("LAST OUTPUT: {} ago", fmt_age((now - t).num_seconds().max(0))),
+        None => "LAST OUTPUT: n/a (no heartbeat-sourced output observed yet)".to_string(),
+    };
     out.push_str(&format!(
-        " {sessions_summary} · {} routine(s) overdue · next: {} · LAST OUTPUT: n/a (no output observer wired in Phase 1-3)\n",
+        " {sessions_summary} · {} routine(s) overdue · next: {} · {last_output}\n",
         overdue_routines,
         next_routine,
     ));
@@ -134,7 +160,7 @@ pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
     }
     out.push_str(&format!("{BOLD}══════════════════════════════════════════════════════════════{RESET}\n\n"));
 
-    // Sessions (§4 L1/L3 content — no bay/room grouping yet, that's Phase 5).
+    // Sessions (§4 L1/L3 content), grouped by §9/Phase 4E bay resolution.
     let session_count_label = if sessions_confirmed {
         format!("({} observed)", store.sessions.values().filter(|r| !r.gone).count())
     } else {
@@ -146,7 +172,13 @@ pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
     // trace (adversarial finding #5). `ended_count` tallies everything past
     // the fade window so the footer still acknowledges it happened.
     let mut ended_count = 0u32;
+    let mut by_bay: std::collections::BTreeMap<&str, Vec<_>> = std::collections::BTreeMap::new();
     for rec in store.sessions.values() {
+        by_bay.entry(crate::bay::resolve_bay(rec.repo_hint.as_deref())).or_default().push(rec);
+    }
+    for (bay, recs) in by_bay {
+        out.push_str(&format!("  {BOLD}▸ {bay}{RESET}\n"));
+        for rec in recs {
         if rec.gone {
             let faded_secs = rec.gone_at.map(|t| (now - t).num_seconds()).unwrap_or(i64::MAX);
             if faded_secs > GONE_FADE_SECS {
@@ -185,6 +217,7 @@ pub fn render_floor(store: &StateStore, now: DateTime<Utc>) -> String {
             rec.id,
             fmt_age(elapsed),
         ));
+        }
     }
     if ended_count > 0 {
         out.push_str(&format!("  {DIM}({ended_count} session(s) ended this run, past the fade window){RESET}\n"));

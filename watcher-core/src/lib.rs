@@ -2,6 +2,8 @@ pub mod schema;
 pub mod redact;
 pub mod health;
 pub mod local;
+pub mod heartbeat;
+pub mod bay;
 pub mod observer;
 pub mod reducer;
 pub mod eventlog;

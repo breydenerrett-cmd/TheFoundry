@@ -16,6 +16,7 @@
 
 use chrono::Utc;
 use foundry_core::eventlog::EventLog;
+use foundry_core::heartbeat::HeartbeatObserver;
 use foundry_core::local::{GitObserver, LocalClaudeObserver};
 use foundry_core::observer::{Observer, RemoteClaudeObserver, SyntheticCanary};
 use foundry_core::reducer::StateStore;
@@ -26,6 +27,8 @@ use std::time::Duration;
 struct Args {
     feed_dir: PathBuf,
     git_dir: PathBuf,
+    heartbeat_dir: Option<PathBuf>,
+    heartbeat_label: String,
     log_dir: PathBuf,
     audit: bool,
     watch_secs: Option<u64>,
@@ -35,6 +38,8 @@ struct Args {
 fn parse_args() -> Args {
     let mut feed_dir = PathBuf::from("live-feed");
     let mut git_dir = PathBuf::from(".");
+    let mut heartbeat_dir = None;
+    let mut heartbeat_label = "SPORTS LAB".to_string();
     let mut log_dir = PathBuf::from("eventlog");
     let mut audit = false;
     let mut watch_secs = None;
@@ -45,6 +50,8 @@ fn parse_args() -> Args {
         match arg.as_str() {
             "--feed-dir" => feed_dir = PathBuf::from(args.next().expect("--feed-dir needs a value")),
             "--git-dir" => git_dir = PathBuf::from(args.next().expect("--git-dir needs a value")),
+            "--heartbeat-dir" => heartbeat_dir = Some(PathBuf::from(args.next().expect("--heartbeat-dir needs a value"))),
+            "--heartbeat-label" => heartbeat_label = args.next().expect("--heartbeat-label needs a value"),
             "--log-dir" => log_dir = PathBuf::from(args.next().expect("--log-dir needs a value")),
             "--audit" => audit = true,
             "--no-remote" => no_remote = true,
@@ -55,7 +62,7 @@ fn parse_args() -> Args {
             other => eprintln!("warning: unrecognized argument '{other}', ignoring"),
         }
     }
-    Args { feed_dir, git_dir, log_dir, audit, watch_secs, no_remote }
+    Args { feed_dir, git_dir, heartbeat_dir, heartbeat_label, log_dir, audit, watch_secs, no_remote }
 }
 
 fn main() {
@@ -64,6 +71,7 @@ fn main() {
     let mut remote = (!args.no_remote).then(|| RemoteClaudeObserver::new(&args.feed_dir));
     let mut local_claude = LocalClaudeObserver::new();
     let mut git = GitObserver::new(&args.git_dir);
+    let mut heartbeat = args.heartbeat_dir.as_ref().map(|d| HeartbeatObserver::new(d, args.heartbeat_label.clone()));
     let mut canary = SyntheticCanary::new();
     let mut store = StateStore::new();
     let mut log = EventLog::new(&args.log_dir, 50_000, 30).expect("failed to open event log directory");
@@ -77,6 +85,9 @@ fn main() {
         }
         all_events.extend(local_claude.poll(now));
         all_events.extend(git.poll(now));
+        if let Some(hb) = &mut heartbeat {
+            all_events.extend(hb.poll(now));
+        }
         all_events.extend(canary.poll(now));
 
         store.apply_events(&all_events, now);
@@ -85,6 +96,9 @@ fn main() {
         }
         store.apply_observer_health(local_claude.health(), now, Some(foundry_core::local::CAP_LOCAL_SESSIONS), None);
         store.apply_observer_health(git.health(), now, None, None);
+        if let Some(hb) = &heartbeat {
+            store.apply_observer_health(hb.health(), now, None, None);
+        }
         store.apply_observer_health(canary.health(), now, None, None);
 
         if let Err(e) = log.append(&all_events) {

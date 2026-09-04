@@ -38,6 +38,9 @@ pub const STALL_WARN_FRACTION: f64 = 0.6;
 pub struct SessionRecord {
     pub id: String,
     pub source: String,
+    /// §9/Phase 4E: whatever repo/cwd hint the observer could supply, used
+    /// by `bay::resolve_bay` to group this session into a project bay.
+    pub repo_hint: Option<String>,
     /// Observed state as reported by the observer — before stall derivation.
     pub observed_state: Field<StationState>,
     /// Displayed state — observed_state, unless the reducer has overridden it
@@ -97,6 +100,11 @@ pub struct CheckRecord {
     pub source: String,
     pub label: Field<String>,
     pub last_seen_at: DateTime<Utc>,
+    /// §5a: the underlying event's own timestamp where recoverable (e.g. a
+    /// heartbeat's real completion time) — this, not `last_seen_at`, is
+    /// what "last output" rollups must use.
+    pub last_event_ts: Option<DateTime<Utc>>,
+    pub repo_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -165,6 +173,7 @@ impl StateStore {
         let entry = self.sessions.entry(ev.entity.id.clone()).or_insert_with(|| SessionRecord {
             id: ev.entity.id.clone(),
             source: ev.source.clone(),
+            repo_hint: ev.entity.parent_id.clone(),
             observed_state: Field::new(state, now, ev.fidelity),
             displayed_state: Field::new(state, now, ev.fidelity),
             model: None,
@@ -187,6 +196,9 @@ impl StateStore {
         }
         entry.gone = false;
         entry.gone_at = None;
+        if ev.entity.parent_id.is_some() {
+            entry.repo_hint = ev.entity.parent_id.clone();
+        }
         if let Some(m) = &ev.model {
             entry.model = Some(Field::new(m.clone(), now, ev.fidelity));
         }
@@ -234,14 +246,28 @@ impl StateStore {
 
     fn apply_check(&mut self, ev: &Event, now: DateTime<Utc>) {
         let Some(label) = &ev.label else { return };
+        // §5a output velocity: the event's OWN timestamp (recovered from
+        // elapsed_ms, exactly like session activity_at) when available —
+        // NOT poll time, which would make "last output" always read as
+        // "just now" regardless of when the underlying work actually
+        // finished (the same class of bug as finding #2).
+        let event_ts = ev.metrics.elapsed_ms.map(|ms| now - chrono::Duration::milliseconds(ms));
         let entry = self.checks.entry(ev.entity.id.clone()).or_insert_with(|| CheckRecord {
             id: ev.entity.id.clone(),
             source: ev.source.clone(),
             label: Field::new(label.clone(), now, ev.fidelity),
             last_seen_at: now,
+            last_event_ts: event_ts,
+            repo_hint: ev.entity.parent_id.clone(),
         });
         entry.source = ev.source.clone();
         entry.label = Field::new(label.clone(), now, ev.fidelity);
+        if let Some(t) = event_ts {
+            entry.last_event_ts = Some(t);
+        }
+        if ev.entity.parent_id.is_some() {
+            entry.repo_hint = ev.entity.parent_id.clone();
+        }
         entry.last_seen_at = now;
     }
 
@@ -339,6 +365,17 @@ impl StateStore {
 
     pub fn last_sync_age_secs(&self, now: DateTime<Utc>) -> Option<i64> {
         self.pipeline.last_any_event_at.map(|t| (now - t).num_seconds().max(0))
+    }
+
+    /// §5a output velocity, first cut: the most recent heartbeat-sourced
+    /// check's own event timestamp — a real completed-script signal, not
+    /// ambient activity. `None` means genuinely no output observer has
+    /// reported anything yet (absence, not a fabricated zero) — the
+    /// renderer must show that as "n/a", never as "0s ago".
+    /// APPROXIMATION: does not yet distinguish ok/degraded/escalate status,
+    /// or fold in git commits — first-cut rollup, not a final taxonomy.
+    pub fn last_output_at(&self) -> Option<DateTime<Utc>> {
+        self.checks.values().filter(|c| c.source == "heartbeat").filter_map(|c| c.last_event_ts).max()
     }
 }
 

@@ -72,7 +72,7 @@ impl Default for LocalClaudeObserver {
     }
 }
 
-fn empty_event(ts: DateTime<Utc>, source: &str, kind: EventKind, entity: EntityRef) -> Event {
+pub fn empty_event(ts: DateTime<Utc>, source: &str, kind: EventKind, entity: EntityRef) -> Event {
     Event {
         ts,
         source: source.to_string(),
@@ -118,7 +118,7 @@ impl Observer for LocalClaudeObserver {
 
                     let raw_label = format!("{} [{}] {}", e.name.clone().unwrap_or_default(), e.kind, e.cwd);
 
-                    let mut ev = empty_event(now, self.name(), EventKind::SessionObserved, EntityRef::new(EntityType::Session, e.session_id.clone()));
+                    let mut ev = empty_event(now, self.name(), EventKind::SessionObserved, EntityRef::new(EntityType::Session, e.session_id.clone()).with_parent(e.cwd.clone()));
                     ev.session_id = Some(e.session_id.clone());
                     // Honest limitation: `claude agents --json` proves the process
                     // is ALIVE, not what it's doing. We render that as Working
@@ -213,7 +213,7 @@ impl Observer for GitObserver {
                 let repo_id = self.repo_path.display().to_string();
                 let label = format!("branch={branch} dirty={dirty} last_commit=\"{last_commit}\"");
 
-                let mut ev = empty_event(now, self.name(), EventKind::WorktreeChanged, EntityRef::new(EntityType::Check, repo_id));
+                let mut ev = empty_event(now, self.name(), EventKind::WorktreeChanged, EntityRef::new(EntityType::Check, repo_id.clone()).with_parent(repo_id));
                 ev.label = Some(crate::redact::redact_field(&label));
                 ev.fidelity = Fidelity::Observed;
                 events.push(ev);
