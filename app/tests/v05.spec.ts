@@ -75,14 +75,16 @@ test("AMBIENT drifts the scene position over time (burn-in hygiene) when motion 
   await page.waitForSelector(".marquee");
   await page.keyboard.press("3");
   await expect(page.locator(".app-shell")).toHaveAttribute("data-mode", "ambient");
-  await page.waitForTimeout(400); // let the 12fps ambient ticker draw at least one frame
-
   // `data-ambient-drift` (world.x offset, hue-drift degrees) is written
   // every ambient-mode frame — see floor.ts's ticker "mode === ambient &&
-  // !reducedMotion" branch. It should move over time, unlike the
-  // reduced-motion case below.
-  const d0 = await page.locator(".floor-host").getAttribute("data-ambient-drift");
-  expect(d0).toBeTruthy();
+  // !reducedMotion" branch. Wait for the first ambient frame (slow CI
+  // runners can take well over a second under software rendering), then
+  // it should move over time, unlike the reduced-motion case below.
+  const host = page.locator(".floor-host");
+  await expect
+    .poll(async () => host.getAttribute("data-ambient-drift"), { timeout: 15_000 })
+    .toBeTruthy();
+  const d0 = await host.getAttribute("data-ambient-drift");
   let moved = false;
   for (let i = 0; i < 20; i++) {
     await page.waitForTimeout(300);
